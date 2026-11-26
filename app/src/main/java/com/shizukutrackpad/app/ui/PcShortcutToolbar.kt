@@ -18,14 +18,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
@@ -42,8 +43,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -52,10 +56,98 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.shizukutrackpad.app.ui.theme.TrackpadTokens
 
+private val KeycapShape = RoundedCornerShape(8.dp)
+private val KeycapFaceHeight = 38.dp
+private val KeycapSkirtHeight = 2.dp
+
+private enum class KeyKind {
+    /** Single key or preset combo (Esc, Tab, Ctrl+C ...). */
+    ACTION,
+
+    /** Glyph keys (arrows, Backspace, Enter) that need a spoken description. */
+    NAV,
+
+    /** Latching one-shot modifier (Ctrl, Alt, Shift, Win). */
+    STICKY
+}
+
+private data class KeySpec(
+    val label: String,
+    val kind: KeyKind,
+    val keyCode: Int = 0,
+    val metaState: Int = 0,
+    val sticky: StickyModifier? = null,
+    val description: String? = null,
+    /** Minimum width when the row scrolls (wide layout). */
+    val minWidth: Dp = 40.dp,
+    /** Share of the row width when the row is distributed (portrait layout). */
+    val weight: Float = 1f,
+    val fontSize: Int = 13
+)
+
+private sealed interface TrayItem
+private data class KeyItem(val spec: KeySpec) : TrayItem
+private data object DividerItem : TrayItem
+private data class GapItem(val width: Dp) : TrayItem
+
+private val CtrlMeta = KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
+private val AltMeta = KeyEvent.META_ALT_ON or KeyEvent.META_ALT_LEFT_ON
+private val MetaMeta = KeyEvent.META_META_ON or KeyEvent.META_META_LEFT_ON
+
+private val KeyEsc = KeySpec("Esc", KeyKind.ACTION, KeyEvent.KEYCODE_ESCAPE, minWidth = 44.dp, weight = 0.85f)
+private val KeyTab = KeySpec("Tab", KeyKind.ACTION, KeyEvent.KEYCODE_TAB, minWidth = 44.dp, weight = 0.85f)
+private val KeyCopy = KeySpec("Ctrl+C", KeyKind.ACTION, KeyEvent.KEYCODE_C, CtrlMeta, minWidth = 56.dp, weight = 1.25f, fontSize = 12)
+private val KeyPaste = KeySpec("Ctrl+V", KeyKind.ACTION, KeyEvent.KEYCODE_V, CtrlMeta, minWidth = 56.dp, weight = 1.25f, fontSize = 12)
+private val KeyAltTab = KeySpec("Alt+Tab", KeyKind.ACTION, KeyEvent.KEYCODE_TAB, AltMeta, minWidth = 62.dp, weight = 1.35f, fontSize = 12)
+private val KeyDesktop = KeySpec("Win+D", KeyKind.ACTION, KeyEvent.KEYCODE_D, MetaMeta, minWidth = 56.dp, weight = 1.25f, fontSize = 12)
+
+private val KeyCtrl = KeySpec("Ctrl", KeyKind.STICKY, sticky = StickyModifier.CTRL, minWidth = 44.dp, fontSize = 12)
+private val KeyAlt = KeySpec("Alt", KeyKind.STICKY, sticky = StickyModifier.ALT, minWidth = 40.dp, fontSize = 12)
+private val KeyShift = KeySpec("Shift", KeyKind.STICKY, sticky = StickyModifier.SHIFT, minWidth = 48.dp, weight = 1.2f, fontSize = 12)
+private val KeyWin = KeySpec("Win", KeyKind.STICKY, sticky = StickyModifier.WIN, minWidth = 42.dp, fontSize = 12)
+
+private val KeyLeft = KeySpec("←", KeyKind.NAV, KeyEvent.KEYCODE_DPAD_LEFT, description = "왼쪽 화살표", minWidth = 38.dp, weight = 0.9f)
+private val KeyUp = KeySpec("↑", KeyKind.NAV, KeyEvent.KEYCODE_DPAD_UP, description = "위쪽 화살표", minWidth = 38.dp, weight = 0.9f)
+private val KeyDown = KeySpec("↓", KeyKind.NAV, KeyEvent.KEYCODE_DPAD_DOWN, description = "아래쪽 화살표", minWidth = 38.dp, weight = 0.9f)
+private val KeyRight = KeySpec("→", KeyKind.NAV, KeyEvent.KEYCODE_DPAD_RIGHT, description = "오른쪽 화살표", minWidth = 38.dp, weight = 0.9f)
+private val KeyBackspace = KeySpec("⌫", KeyKind.NAV, KeyEvent.KEYCODE_DEL, description = "백스페이스", minWidth = 42.dp, weight = 1.05f)
+private val KeyEnter = KeySpec("↵", KeyKind.NAV, KeyEvent.KEYCODE_ENTER, description = "엔터", minWidth = 44.dp, weight = 1.1f)
+
+// Backspace is fenced off from the arrows and kept apart from Enter so a mis-tap never sends Enter.
+private val EditingCluster: List<TrayItem> = listOf(
+    DividerItem,
+    KeyItem(KeyBackspace),
+    GapItem(4.dp),
+    KeyItem(KeyEnter)
+)
+
+private val WideRow: List<TrayItem> = listOf(
+    KeyItem(KeyEsc), KeyItem(KeyTab),
+    DividerItem,
+    KeyItem(KeyCtrl), KeyItem(KeyAlt), KeyItem(KeyShift), KeyItem(KeyWin),
+    DividerItem,
+    KeyItem(KeyCopy), KeyItem(KeyPaste), KeyItem(KeyAltTab), KeyItem(KeyDesktop),
+    DividerItem,
+    KeyItem(KeyLeft), KeyItem(KeyUp), KeyItem(KeyDown), KeyItem(KeyRight)
+) + EditingCluster
+
+private val PortraitRowPresets: List<TrayItem> = listOf(
+    KeyItem(KeyEsc), KeyItem(KeyTab),
+    DividerItem,
+    KeyItem(KeyCopy), KeyItem(KeyPaste), KeyItem(KeyAltTab), KeyItem(KeyDesktop)
+)
+
+private val PortraitRowKeys: List<TrayItem> = listOf(
+    KeyItem(KeyCtrl), KeyItem(KeyAlt), KeyItem(KeyShift), KeyItem(KeyWin),
+    DividerItem,
+    KeyItem(KeyLeft), KeyItem(KeyUp), KeyItem(KeyDown), KeyItem(KeyRight)
+) + EditingCluster
+
 /**
  * Recessed hardware shortcut tray:
- * - Portrait (< 600dp wide): 2 balanced tactile keycap rows.
- * - Landscape (>= 600dp wide): 1 unified full-width hardware key row reclaiming ~78dp for trackpad.
+ * - Portrait (< 600dp wide): 2 rows whose keys share the full width, so every key
+ *   (including Backspace / Enter) is always on screen without horizontal scrolling.
+ * - Landscape (>= 600dp wide): 1 unified row (scrolls only if the screen is too narrow).
  */
 @Composable
 fun PcShortcutToolbar(
@@ -68,8 +160,14 @@ fun PcShortcutToolbar(
     val view = LocalView.current
     val isWideLayout = LocalConfiguration.current.screenWidthDp >= 600
 
-    val triggerHaptic: () -> Unit = {
+    val onKey: (KeySpec) -> Unit = { spec ->
         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+        val sticky = spec.sticky
+        if (sticky != null) {
+            onToggleModifier(sticky)
+        } else {
+            onSendKey(spec.keyCode, spec.metaState)
+        }
     }
 
     AnimatedVisibility(
@@ -83,383 +181,96 @@ fun PcShortcutToolbar(
                 .fillMaxWidth()
                 .background(TrackpadTokens.DeckSurface)
         ) {
-            if (isWideLayout) {
-                // Single unified full-width row on landscape phones / tablets
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    HardwareKeycap(
-                        label = "Esc",
-                        minWidth = 38.dp,
-                        isModifierStyle = false,
-                        onClick = {
-                            triggerHaptic()
-                            onSendKey(KeyEvent.KEYCODE_ESCAPE, 0)
-                        }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (isWideLayout) {
+                    TrayRow(
+                        items = WideRow,
+                        distribute = false,
+                        stickyModifiers = stickyModifiers,
+                        onKey = onKey
                     )
-                    HardwareKeycap(
-                        label = "Tab",
-                        minWidth = 38.dp,
-                        isModifierStyle = false,
-                        onClick = {
-                            triggerHaptic()
-                            onSendKey(KeyEvent.KEYCODE_TAB, 0)
-                        }
+                } else {
+                    TrayRow(
+                        items = PortraitRowPresets,
+                        distribute = true,
+                        stickyModifiers = stickyModifiers,
+                        onKey = onKey
                     )
-
-                    TrayDivider()
-
-                    StickyHardwareKeycap(
-                        label = "Ctrl",
-                        active = stickyModifiers.ctrl,
-                        minWidth = 40.dp,
-                        onClick = {
-                            triggerHaptic()
-                            onToggleModifier(StickyModifier.CTRL)
-                        }
+                    TrayRow(
+                        items = PortraitRowKeys,
+                        distribute = true,
+                        stickyModifiers = stickyModifiers,
+                        onKey = onKey
                     )
-                    StickyHardwareKeycap(
-                        label = "Alt",
-                        active = stickyModifiers.alt,
-                        minWidth = 36.dp,
-                        onClick = {
-                            triggerHaptic()
-                            onToggleModifier(StickyModifier.ALT)
-                        }
-                    )
-                    StickyHardwareKeycap(
-                        label = "Shift",
-                        active = stickyModifiers.shift,
-                        minWidth = 44.dp,
-                        onClick = {
-                            triggerHaptic()
-                            onToggleModifier(StickyModifier.SHIFT)
-                        }
-                    )
-                    StickyHardwareKeycap(
-                        label = "Win",
-                        active = stickyModifiers.win,
-                        minWidth = 38.dp,
-                        onClick = {
-                            triggerHaptic()
-                            onToggleModifier(StickyModifier.WIN)
-                        }
-                    )
-
-                    TrayDivider()
-
-                    HardwareKeycap(
-                        label = "Ctrl+C",
-                        minWidth = 52.dp,
-                        isModifierStyle = false,
-                        onClick = {
-                            triggerHaptic()
-                            onSendKey(
-                                KeyEvent.KEYCODE_C,
-                                KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
-                            )
-                        }
-                    )
-                    HardwareKeycap(
-                        label = "Ctrl+V",
-                        minWidth = 52.dp,
-                        isModifierStyle = false,
-                        onClick = {
-                            triggerHaptic()
-                            onSendKey(
-                                KeyEvent.KEYCODE_V,
-                                KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
-                            )
-                        }
-                    )
-                    HardwareKeycap(
-                        label = "Alt+Tab",
-                        minWidth = 56.dp,
-                        isModifierStyle = false,
-                        onClick = {
-                            triggerHaptic()
-                            onSendKey(
-                                KeyEvent.KEYCODE_TAB,
-                                KeyEvent.META_ALT_ON or KeyEvent.META_ALT_LEFT_ON
-                            )
-                        }
-                    )
-                    HardwareKeycap(
-                        label = "Win+D",
-                        minWidth = 52.dp,
-                        isModifierStyle = false,
-                        onClick = {
-                            triggerHaptic()
-                            onSendKey(
-                                KeyEvent.KEYCODE_D,
-                                KeyEvent.META_META_ON or KeyEvent.META_META_LEFT_ON
-                            )
-                        }
-                    )
-
-                    TrayDivider()
-
-                    NavHardwareKeycap(
-                        label = "←",
-                        description = "Left Arrow",
-                        minWidth = 34.dp,
-                        onClick = {
-                            triggerHaptic()
-                            onSendKey(KeyEvent.KEYCODE_DPAD_LEFT, 0)
-                        }
-                    )
-                    NavHardwareKeycap(
-                        label = "↑",
-                        description = "Up Arrow",
-                        minWidth = 34.dp,
-                        onClick = {
-                            triggerHaptic()
-                            onSendKey(KeyEvent.KEYCODE_DPAD_UP, 0)
-                        }
-                    )
-                    NavHardwareKeycap(
-                        label = "↓",
-                        description = "Down Arrow",
-                        minWidth = 34.dp,
-                        onClick = {
-                            triggerHaptic()
-                            onSendKey(KeyEvent.KEYCODE_DPAD_DOWN, 0)
-                        }
-                    )
-                    NavHardwareKeycap(
-                        label = "→",
-                        description = "Right Arrow",
-                        minWidth = 34.dp,
-                        onClick = {
-                            triggerHaptic()
-                            onSendKey(KeyEvent.KEYCODE_DPAD_RIGHT, 0)
-                        }
-                    )
-                    NavHardwareKeycap(
-                        label = "⌫",
-                        description = "Backspace",
-                        minWidth = 38.dp,
-                        onClick = {
-                            triggerHaptic()
-                            onSendKey(KeyEvent.KEYCODE_DEL, 0)
-                        }
-                    )
-                    NavHardwareKeycap(
-                        label = "↵",
-                        description = "Enter",
-                        minWidth = 40.dp,
-                        onClick = {
-                            triggerHaptic()
-                            onSendKey(KeyEvent.KEYCODE_ENTER, 0)
-                        }
-                    )
-                }
-            } else {
-                // Portrait 2-row hardware tray
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    // Row 1: Esc, Tab + scrollable preset macros
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        HardwareKeycap(
-                            label = "Esc",
-                            minWidth = 44.dp,
-                            isModifierStyle = false,
-                            onClick = {
-                                triggerHaptic()
-                                onSendKey(KeyEvent.KEYCODE_ESCAPE, 0)
-                            }
-                        )
-                        HardwareKeycap(
-                            label = "Tab",
-                            minWidth = 44.dp,
-                            isModifierStyle = false,
-                            onClick = {
-                                triggerHaptic()
-                                onSendKey(KeyEvent.KEYCODE_TAB, 0)
-                            }
-                        )
-
-                        TrayDivider()
-
-                        HardwareKeycap(
-                            label = "Ctrl+C",
-                            minWidth = 56.dp,
-                            isModifierStyle = false,
-                            onClick = {
-                                triggerHaptic()
-                                onSendKey(
-                                    KeyEvent.KEYCODE_C,
-                                    KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
-                                )
-                            }
-                        )
-                        HardwareKeycap(
-                            label = "Ctrl+V",
-                            minWidth = 56.dp,
-                            isModifierStyle = false,
-                            onClick = {
-                                triggerHaptic()
-                                onSendKey(
-                                    KeyEvent.KEYCODE_V,
-                                    KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
-                                )
-                            }
-                        )
-                        HardwareKeycap(
-                            label = "Alt+Tab",
-                            minWidth = 62.dp,
-                            isModifierStyle = false,
-                            onClick = {
-                                triggerHaptic()
-                                onSendKey(
-                                    KeyEvent.KEYCODE_TAB,
-                                    KeyEvent.META_ALT_ON or KeyEvent.META_ALT_LEFT_ON
-                                )
-                            }
-                        )
-                        HardwareKeycap(
-                            label = "Win+D",
-                            minWidth = 56.dp,
-                            isModifierStyle = false,
-                            onClick = {
-                                triggerHaptic()
-                                onSendKey(
-                                    KeyEvent.KEYCODE_D,
-                                    KeyEvent.META_META_ON or KeyEvent.META_META_LEFT_ON
-                                )
-                            }
-                        )
-                    }
-
-                    // Row 2: Sticky modifiers + Arrows + Backspace/Enter
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        StickyHardwareKeycap(
-                            label = "Ctrl",
-                            active = stickyModifiers.ctrl,
-                            minWidth = 40.dp,
-                            onClick = {
-                                triggerHaptic()
-                                onToggleModifier(StickyModifier.CTRL)
-                            }
-                        )
-                        StickyHardwareKeycap(
-                            label = "Alt",
-                            active = stickyModifiers.alt,
-                            minWidth = 36.dp,
-                            onClick = {
-                                triggerHaptic()
-                                onToggleModifier(StickyModifier.ALT)
-                            }
-                        )
-                        StickyHardwareKeycap(
-                            label = "Shift",
-                            active = stickyModifiers.shift,
-                            minWidth = 44.dp,
-                            onClick = {
-                                triggerHaptic()
-                                onToggleModifier(StickyModifier.SHIFT)
-                            }
-                        )
-                        StickyHardwareKeycap(
-                            label = "Win",
-                            active = stickyModifiers.win,
-                            minWidth = 38.dp,
-                            onClick = {
-                                triggerHaptic()
-                                onToggleModifier(StickyModifier.WIN)
-                            }
-                        )
-
-                        TrayDivider()
-
-                        NavHardwareKeycap(
-                            label = "←",
-                            description = "Left Arrow",
-                            minWidth = 34.dp,
-                            onClick = {
-                                triggerHaptic()
-                                onSendKey(KeyEvent.KEYCODE_DPAD_LEFT, 0)
-                            }
-                        )
-                        NavHardwareKeycap(
-                            label = "↑",
-                            description = "Up Arrow",
-                            minWidth = 34.dp,
-                            onClick = {
-                                triggerHaptic()
-                                onSendKey(KeyEvent.KEYCODE_DPAD_UP, 0)
-                            }
-                        )
-                        NavHardwareKeycap(
-                            label = "↓",
-                            description = "Down Arrow",
-                            minWidth = 34.dp,
-                            onClick = {
-                                triggerHaptic()
-                                onSendKey(KeyEvent.KEYCODE_DPAD_DOWN, 0)
-                            }
-                        )
-                        NavHardwareKeycap(
-                            label = "→",
-                            description = "Right Arrow",
-                            minWidth = 34.dp,
-                            onClick = {
-                                triggerHaptic()
-                                onSendKey(KeyEvent.KEYCODE_DPAD_RIGHT, 0)
-                            }
-                        )
-                        NavHardwareKeycap(
-                            label = "⌫",
-                            description = "Backspace",
-                            minWidth = 38.dp,
-                            onClick = {
-                                triggerHaptic()
-                                onSendKey(KeyEvent.KEYCODE_DEL, 0)
-                            }
-                        )
-                        NavHardwareKeycap(
-                            label = "↵",
-                            description = "Enter",
-                            minWidth = 40.dp,
-                            onClick = {
-                                triggerHaptic()
-                                onSendKey(KeyEvent.KEYCODE_ENTER, 0)
-                            }
-                        )
-                    }
                 }
             }
 
-            // Clean structural hairline separating tray from trackpad
+            // Structural hairline separating tray from trackpad
             Spacer(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(0.75.dp)
+                    .height(1.dp)
                     .background(TrackpadTokens.Hairline)
             )
         }
     }
+}
+
+@Composable
+private fun TrayRow(
+    items: List<TrayItem>,
+    distribute: Boolean,
+    stickyModifiers: StickyModifiersState,
+    onKey: (KeySpec) -> Unit
+) {
+    val rowModifier = if (distribute) {
+        Modifier.fillMaxWidth()
+    } else {
+        Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+    }
+
+    Row(
+        modifier = rowModifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        items.forEach { item ->
+            when (item) {
+                is KeyItem -> {
+                    val spec = item.spec
+                    val sizeModifier = if (distribute) {
+                        Modifier.weight(spec.weight)
+                    } else {
+                        Modifier.widthIn(min = spec.minWidth)
+                    }
+                    HardwareKeycap(
+                        spec = spec,
+                        active = spec.sticky?.let { stickyModifiers.isActive(it) } ?: false,
+                        tightPadding = distribute,
+                        onClick = { onKey(spec) },
+                        modifier = sizeModifier
+                    )
+                }
+
+                DividerItem -> TrayDivider()
+                is GapItem -> Spacer(modifier = Modifier.width(item.width))
+            }
+        }
+    }
+}
+
+private fun StickyModifiersState.isActive(modifier: StickyModifier): Boolean = when (modifier) {
+    StickyModifier.CTRL -> ctrl
+    StickyModifier.ALT -> alt
+    StickyModifier.SHIFT -> shift
+    StickyModifier.WIN -> win
 }
 
 @Composable
@@ -468,209 +279,124 @@ private fun TrayDivider() {
         modifier = Modifier
             .padding(horizontal = 2.dp)
             .width(1.dp)
-            .height(20.dp)
-            .background(TrackpadTokens.Hairline)
+            .height(22.dp)
+            .background(TrackpadTokens.KeycapBorder)
     )
 }
 
+/**
+ * Tactile keycap: 38dp face over a 2dp skirt (40dp total). Pressed or latched keys sink onto the skirt.
+ */
 @Composable
 private fun HardwareKeycap(
-    label: String,
-    minWidth: Dp,
-    isModifierStyle: Boolean,
-    onClick: () -> Unit
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val pressed by interactionSource.collectIsPressedAsState()
-
-    val faceColor = when {
-        pressed -> TrackpadTokens.SurfacePressed
-        isModifierStyle -> TrackpadTokens.KeycapModifier
-        else -> TrackpadTokens.KeycapSurface
-    }
-
-    Box(
-        modifier = Modifier
-            .defaultMinSize(minWidth = minWidth)
-            .height(34.dp)
-            .drawBehind {
-                // Subtle 2dp physical keycap bottom skirt
-                if (!pressed) {
-                    drawRoundRect(
-                        color = TrackpadTokens.KeycapSkirt,
-                        topLeft = Offset(0f, 2.dp.toPx()),
-                        size = Size(size.width, size.height - 2.dp.toPx()),
-                        cornerRadius = CornerRadius(7.dp.toPx(), 7.dp.toPx())
-                    )
-                }
-            }
-    ) {
-        Surface(
-            modifier = Modifier
-                .defaultMinSize(minWidth = minWidth)
-                .height(32.dp)
-                .offset(y = if (pressed) 1.5.dp else 0.dp)
-                .clip(RoundedCornerShape(7.dp))
-                .clickable(
-                    interactionSource = interactionSource,
-                    indication = null,
-                    onClick = onClick
-                ),
-            shape = RoundedCornerShape(7.dp),
-            color = faceColor,
-            border = BorderStroke(0.75.dp, TrackpadTokens.KeycapBorder)
-        ) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier.padding(horizontal = 7.dp)
-            ) {
-                Text(
-                    text = label,
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.SansSerif,
-                    fontWeight = FontWeight.Medium,
-                    color = TrackpadTokens.InkPrimary,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Clip
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun StickyHardwareKeycap(
-    label: String,
+    spec: KeySpec,
     active: Boolean,
-    minWidth: Dp,
-    onClick: () -> Unit
+    tightPadding: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
+    val isSticky = spec.kind == KeyKind.STICKY
+    val sunk = pressed || active
 
     val faceColor = when {
         active -> TrackpadTokens.InkPrimary
         pressed -> TrackpadTokens.SurfacePressed
+        spec.kind == KeyKind.ACTION -> TrackpadTokens.KeycapSurface
         else -> TrackpadTokens.KeycapModifier
     }
 
+    val interactionModifier = if (isSticky) {
+        Modifier
+            .toggleable(
+                value = active,
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Switch,
+                onValueChange = { onClick() }
+            )
+            .semantics {
+                stateDescription = if (active) "고정됨 (다음 키에 1회 적용)" else "해제됨"
+            }
+    } else {
+        val description = spec.description
+        Modifier
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Button,
+                onClick = onClick
+            )
+            .then(
+                if (description != null) {
+                    Modifier.semantics { contentDescription = description }
+                } else {
+                    Modifier
+                }
+            )
+    }
+
     Box(
-        modifier = Modifier
-            .defaultMinSize(minWidth = minWidth)
-            .height(34.dp)
+        modifier = modifier
             .drawBehind {
-                if (!pressed && !active) {
+                // Subtle physical keycap bottom skirt
+                if (!sunk) {
                     drawRoundRect(
                         color = TrackpadTokens.KeycapSkirt,
-                        topLeft = Offset(0f, 2.dp.toPx()),
-                        size = Size(size.width, size.height - 2.dp.toPx()),
-                        cornerRadius = CornerRadius(7.dp.toPx(), 7.dp.toPx())
+                        topLeft = Offset(0f, KeycapSkirtHeight.toPx()),
+                        size = Size(size.width, size.height - KeycapSkirtHeight.toPx()),
+                        cornerRadius = CornerRadius(8.dp.toPx(), 8.dp.toPx())
                     )
                 }
             }
+            .padding(bottom = KeycapSkirtHeight),
+        propagateMinConstraints = true
     ) {
         Surface(
             modifier = Modifier
-                .defaultMinSize(minWidth = minWidth)
-                .height(32.dp)
-                .offset(y = if (pressed || active) 1.dp else 0.dp)
-                .clip(RoundedCornerShape(7.dp))
-                .clickable(
-                    interactionSource = interactionSource,
-                    indication = null,
-                    onClick = onClick
-                ),
-            shape = RoundedCornerShape(7.dp),
+                .height(KeycapFaceHeight)
+                .offset(y = if (sunk) 1.5.dp else 0.dp)
+                .clip(KeycapShape)
+                .then(interactionModifier),
+            shape = KeycapShape,
             color = faceColor,
             border = BorderStroke(
-                width = 0.75.dp,
+                width = 1.dp,
                 color = if (active) TrackpadTokens.InkPrimary else TrackpadTokens.KeycapBorder
             )
         ) {
             Box(
-                modifier = Modifier
-                    .defaultMinSize(minWidth = minWidth)
-                    .padding(horizontal = 7.dp)
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.padding(horizontal = if (tightPadding) 3.dp else 8.dp)
             ) {
                 Text(
-                    text = label,
-                    fontSize = 10.sp,
+                    text = spec.label,
+                    fontSize = spec.fontSize.sp,
+                    fontFamily = FontFamily.SansSerif,
                     fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                    color = if (active) TrackpadTokens.InkInverse else TrackpadTokens.InkSecondary,
+                    color = if (active) TrackpadTokens.InkInverse else TrackpadTokens.InkPrimary,
                     maxLines = 1,
                     softWrap = false,
-                    modifier = Modifier.align(Alignment.Center)
+                    overflow = TextOverflow.Clip,
+                    // Glyph keys are announced via their description instead of the raw symbol
+                    modifier = if (spec.description != null) {
+                        Modifier.clearAndSetSemantics { }
+                    } else {
+                        Modifier
+                    }
                 )
-                // Teenage Engineering style 4dp signal-orange hardware LED when latched
+                // Signal-orange hardware LED when a sticky modifier is latched
                 if (active) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .padding(top = 4.dp)
+                            .padding(top = 4.dp, end = 2.dp)
                             .size(4.dp)
                             .clip(CircleShape)
                             .background(TrackpadTokens.AccentSignal)
                     )
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun NavHardwareKeycap(
-    label: String,
-    description: String,
-    minWidth: Dp,
-    onClick: () -> Unit
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val pressed by interactionSource.collectIsPressedAsState()
-
-    Box(
-        modifier = Modifier
-            .defaultMinSize(minWidth = minWidth)
-            .height(34.dp)
-            .drawBehind {
-                if (!pressed) {
-                    drawRoundRect(
-                        color = TrackpadTokens.KeycapSkirt,
-                        topLeft = Offset(0f, 2.dp.toPx()),
-                        size = Size(size.width, size.height - 2.dp.toPx()),
-                        cornerRadius = CornerRadius(7.dp.toPx(), 7.dp.toPx())
-                    )
-                }
-            }
-    ) {
-        Surface(
-            modifier = Modifier
-                .defaultMinSize(minWidth = minWidth)
-                .height(32.dp)
-                .offset(y = if (pressed) 1.5.dp else 0.dp)
-                .clip(RoundedCornerShape(7.dp))
-                .semantics { contentDescription = description }
-                .clickable(
-                    interactionSource = interactionSource,
-                    indication = null,
-                    onClick = onClick
-                ),
-            shape = RoundedCornerShape(7.dp),
-            color = if (pressed) TrackpadTokens.SurfacePressed else TrackpadTokens.KeycapModifier,
-            border = BorderStroke(0.75.dp, TrackpadTokens.KeycapBorder)
-        ) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier.padding(horizontal = 6.dp)
-            ) {
-                Text(
-                    text = label,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = TrackpadTokens.InkPrimary,
-                    maxLines = 1,
-                    softWrap = false
-                )
             }
         }
     }

@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.ShizukuTrackpad" parent="android:Theme.Material.NoActionBar" />
+    <style name="Theme.ShizukuTrackpad" parent="android:Theme.Material.NoActionBar">
+        <!-- Avoid a gray flash before Compose draws the OLED-black UI -->
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
 </resources>

@@ -36,6 +36,10 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -54,8 +58,8 @@ private const val REALTIME_SENTINEL = "\u200B"
  * 1. Direct Hidden Mode (isRealtimeAsciiMode = true): focuses an invisible 1dp BasicTextField
  *    with zero vertical footprint, injecting ASCII/digits/symbols/Backspace/Enter immediately.
  *    Auto-promotes to the visible Korean Input Bar if Hangul/non-ASCII is entered.
- * 2. Korean Input Bar Mode (isRealtimeAsciiMode = false): single-line 44dp recessed hardware strip
- *    ([한/EN] pill + inset black field + crisp Send button) with zero redundant helper chrome.
+ * 2. Korean Input Bar Mode (isRealtimeAsciiMode = false): single-line 48dp recessed hardware strip
+ *    ([한/EN] toggle + inset black field + Send button, disabled while empty).
  */
 @Composable
 fun KoreanInputBar(
@@ -109,7 +113,9 @@ fun KoreanInputBar(
 
     fun submitCurrentInput() {
         val raw = fieldValue.text.replace(REALTIME_SENTINEL, "")
-        triggerHaptic()
+        if (isRealtimeAsciiMode || raw.isNotEmpty()) {
+            triggerHaptic()
+        }
         if (isRealtimeAsciiMode) {
             if (raw.isNotEmpty()) {
                 onSendPasteText(raw)
@@ -192,6 +198,7 @@ fun KoreanInputBar(
             textFieldContent(Modifier.size(1.dp))
         }
     } else {
+        val hasPendingText = fieldValue.text.replace(REALTIME_SENTINEL, "").isNotEmpty()
         Column(
             modifier = modifier
                 .fillMaxWidth()
@@ -200,28 +207,32 @@ fun KoreanInputBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 // Single-tap mode switch back to hidden direct EN
                 Surface(
                     modifier = Modifier
-                        .width(36.dp)
-                        .height(34.dp)
+                        .width(44.dp)
+                        .height(40.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable {
+                        .clickable(role = Role.Button) {
                             triggerHaptic()
                             onToggleRealtimeMode()
+                        }
+                        .semantics {
+                            contentDescription = "한글 입력창 사용 중. 탭하면 영문 직접 입력으로 전환"
                         },
                     shape = RoundedCornerShape(8.dp),
                     color = TrackpadTokens.KeycapSurface,
-                    border = BorderStroke(0.75.dp, TrackpadTokens.KeycapBorder)
+                    border = BorderStroke(1.dp, TrackpadTokens.KeycapBorder)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Text(
                             text = "한",
-                            fontSize = 12.sp,
+                            fontSize = 14.sp,
+                            modifier = Modifier.clearAndSetSemantics { },
                             fontWeight = FontWeight.SemiBold,
                             color = TrackpadTokens.AccentSignal
                         )
@@ -231,17 +242,17 @@ fun KoreanInputBar(
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .height(34.dp)
+                        .height(40.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(TrackpadTokens.ChassisBlack)
-                        .border(0.75.dp, TrackpadTokens.Hairline, RoundedCornerShape(8.dp))
+                        .border(1.dp, TrackpadTokens.KeycapBorder, RoundedCornerShape(8.dp))
                         .padding(horizontal = 10.dp),
                     contentAlignment = Alignment.CenterStart
                 ) {
                     if (fieldValue.text.replace(REALTIME_SENTINEL, "").isEmpty()) {
                         Text(
-                            text = "외장 화면에 입력...",
-                            fontSize = 13.sp,
+                            text = "외장 화면에 보낼 글자 입력",
+                            fontSize = 14.sp,
                             color = TrackpadTokens.InkMuted,
                             maxLines = 1
                         )
@@ -251,21 +262,21 @@ fun KoreanInputBar(
 
                 Surface(
                     modifier = Modifier
-                        .height(34.dp)
+                        .height(40.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable { submitCurrentInput() },
+                        .clickable(enabled = hasPendingText, role = Role.Button) { submitCurrentInput() },
                     shape = RoundedCornerShape(8.dp),
-                    color = TrackpadTokens.InkPrimary
+                    color = if (hasPendingText) TrackpadTokens.InkPrimary else TrackpadTokens.SurfacePressed
                 ) {
                     Box(
                         contentAlignment = Alignment.Center,
-                        modifier = Modifier.padding(horizontal = 12.dp)
+                        modifier = Modifier.padding(horizontal = 16.dp)
                     ) {
                         Text(
                             text = "전송",
-                            fontSize = 12.sp,
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = TrackpadTokens.InkInverse
+                            color = if (hasPendingText) TrackpadTokens.InkInverse else TrackpadTokens.InkSecondary
                         )
                     }
                 }
@@ -274,7 +285,7 @@ fun KoreanInputBar(
             Spacer(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(0.75.dp)
+                    .height(1.dp)
                     .background(TrackpadTokens.Hairline)
             )
         }
