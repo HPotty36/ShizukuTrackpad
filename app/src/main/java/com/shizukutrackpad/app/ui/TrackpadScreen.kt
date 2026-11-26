@@ -95,6 +95,7 @@ import androidx.compose.ui.unit.dp
 import com.shizukutrackpad.app.R
 import com.shizukutrackpad.app.data.DisplayTarget
 import com.shizukutrackpad.app.shizuku.ShizukuConnectionStatus
+import com.shizukutrackpad.app.update.UpdateState
 import com.shizukutrackpad.app.ui.theme.TrackpadRadius
 import com.shizukutrackpad.app.ui.theme.TrackpadTokens
 import com.shizukutrackpad.app.ui.theme.TrackpadType
@@ -118,6 +119,8 @@ private data class TapPulseEvent(
 @Composable
 fun TrackpadScreen(viewModel: TrackpadViewModel) {
     val uiState by viewModel.uiState.collectAsState()
+    val updateState by viewModel.updateState.collectAsState()
+    val dismissedUpdateVersion by viewModel.dismissedUpdateVersion.collectAsState()
     var showSettingsSheet by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
@@ -161,6 +164,13 @@ fun TrackpadScreen(viewModel: TrackpadViewModel) {
             onToggleRealtimeMode = viewModel::toggleRealtimeAsciiMode,
             onToggleShortcutTray = viewModel::toggleShortcutToolbar,
             onOpenSettings = { showSettingsSheet = true }
+        )
+
+        UpdateBanner(
+            state = updateState,
+            dismissedVersion = dismissedUpdateVersion,
+            onUpdate = viewModel::startUpdate,
+            onDismiss = viewModel::dismissUpdateBanner
         )
 
         // Recessed hardware shortcut tray (1 row in landscape, 2 rows in portrait)
@@ -257,7 +267,11 @@ fun TrackpadScreen(viewModel: TrackpadViewModel) {
             onNaturalScrollChange = viewModel::setNaturalScroll,
             onShowPhysicalButtonsChange = viewModel::setShowPhysicalButtons,
             onKeepScreenOnChange = viewModel::setKeepScreenOn,
-            onResetCursor = viewModel::resetCursorToCenter
+            onResetCursor = viewModel::resetCursorToCenter,
+            updateState = updateState,
+            currentVersion = viewModel.currentAppVersion,
+            onCheckForUpdate = viewModel::checkForUpdate,
+            onStartUpdate = viewModel::startUpdate
         )
     }
 }
@@ -1415,7 +1429,11 @@ private fun TrackpadSettingsBottomSheet(
     onNaturalScrollChange: (Boolean) -> Unit,
     onShowPhysicalButtonsChange: (Boolean) -> Unit,
     onKeepScreenOnChange: (Boolean) -> Unit,
-    onResetCursor: () -> Unit
+    onResetCursor: () -> Unit,
+    updateState: UpdateState,
+    currentVersion: String,
+    onCheckForUpdate: () -> Unit,
+    onStartUpdate: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val sensitivityLabel = stringResource(R.string.settings_sensitivity)
@@ -1562,6 +1580,15 @@ private fun TrackpadSettingsBottomSheet(
                     )
                 }
             }
+
+            HorizontalDivider(color = TrackpadTokens.Hairline)
+
+            UpdateSettingsSection(
+                state = updateState,
+                currentVersion = currentVersion,
+                onCheck = onCheckForUpdate,
+                onUpdate = onStartUpdate
+            )
         }
     }
 }
