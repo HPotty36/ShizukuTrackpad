@@ -74,7 +74,7 @@ class ShizukuServiceManager {
                     it.copy(
                         status = ShizukuConnectionStatus.ERROR,
                         isServiceBound = false,
-                        errorMessage = "UserService binder is invalid"
+                        errorMessage = "입력 서비스 연결이 올바르지 않습니다. 재연결해 주세요."
                     )
                 }
                 return
@@ -235,7 +235,7 @@ class ShizukuServiceManager {
                 it.copy(
                     status = ShizukuConnectionStatus.ERROR,
                     isServiceBound = false,
-                    errorMessage = "서비스 바인딩 실패: ${t.message}"
+                    errorMessage = "입력 서비스를 시작하지 못했습니다. 재연결해 주세요."
                 )
             }
         }
