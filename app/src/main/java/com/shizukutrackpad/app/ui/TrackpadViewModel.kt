@@ -18,7 +18,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 enum class StickyModifier {
     CTRL,
@@ -81,15 +83,19 @@ data class TrackpadUiState(
 class TrackpadViewModel(application: Application) : AndroidViewModel(application) {
 
     private val displayRepository = DisplayRepository(application)
-    private val shizukuManager = ShizukuServiceManager()
+    private val shizukuManager = ShizukuServiceManager(application)
     private val clipboardManager =
         application.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     private val virtualKeyMap: KeyCharacterMap =
         KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD)
 
+    private val settingsStore = TrackpadSettingsStore(application)
+
     private val selectedDisplayId = MutableStateFlow<Int?>(null)
-    private val settings = MutableStateFlow(TrackpadSettings())
-    private val toolbarControl = MutableStateFlow(ToolbarControlState())
+    private val settings = MutableStateFlow(settingsStore.loadSettings())
+    private val toolbarControl = MutableStateFlow(
+        ToolbarControlState(isShortcutToolbarExpanded = settingsStore.loadShortcutTrayExpanded())
+    )
     private var userManuallySelectedDefault = false
 
     val uiState: StateFlow<TrackpadUiState> = combine(
@@ -115,7 +121,12 @@ class TrackpadViewModel(application: Application) : AndroidViewModel(application
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = TrackpadUiState()
+        // Seed the first frame with persisted values so a collapsed tray / hidden clickpad
+        // doesn't animate closed on every cold start.
+        initialValue = TrackpadUiState(
+            settings = settings.value,
+            isShortcutToolbarExpanded = toolbarControl.value.isShortcutToolbarExpanded
+        )
     )
 
     init {
@@ -170,20 +181,38 @@ class TrackpadViewModel(application: Application) : AndroidViewModel(application
         shizukuManager.bindService()
     }
 
+    /** Live slider updates: in memory only; [commitSensitivity] persists when the drag ends. */
     fun setSensitivity(value: Float) {
-        settings.update { it.copy(sensitivity = value.coerceIn(0.5f, 3.0f)) }
+        val rounded = (value * 10f).roundToInt() / 10f
+        settings.update {
+            it.copy(
+                sensitivity = rounded.coerceIn(
+                    TrackpadSettingsStore.MIN_SENSITIVITY,
+                    TrackpadSettingsStore.MAX_SENSITIVITY
+                )
+            )
+        }
+    }
+
+    fun commitSensitivity() {
+        settingsStore.saveSettings(settings.value)
     }
 
     fun setNaturalScroll(enabled: Boolean) {
-        settings.update { it.copy(naturalScroll = enabled) }
+        updateSettings { it.copy(naturalScroll = enabled) }
     }
 
     fun setShowPhysicalButtons(enabled: Boolean) {
-        settings.update { it.copy(showPhysicalButtons = enabled) }
+        updateSettings { it.copy(showPhysicalButtons = enabled) }
     }
 
     fun setKeepScreenOn(enabled: Boolean) {
-        settings.update { it.copy(keepScreenOn = enabled) }
+        updateSettings { it.copy(keepScreenOn = enabled) }
+    }
+
+    private inline fun updateSettings(transform: (TrackpadSettings) -> TrackpadSettings) {
+        val updated = settings.updateAndGet(transform)
+        settingsStore.saveSettings(updated)
     }
 
     fun onTrackpadMove(dx: Float, dy: Float) {
@@ -233,11 +262,19 @@ class TrackpadViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun toggleShortcutToolbar() {
-        toolbarControl.update { it.copy(isShortcutToolbarExpanded = !it.isShortcutToolbarExpanded) }
+        val updated = toolbarControl.updateAndGet {
+            it.copy(isShortcutToolbarExpanded = !it.isShortcutToolbarExpanded)
+        }
+        settingsStore.saveShortcutTrayExpanded(updated.isShortcutToolbarExpanded)
     }
 
     fun toggleKeyboardBar() {
         toolbarControl.update { it.copy(isKeyboardBarVisible = !it.isKeyboardBarVisible) }
+    }
+
+    /** The system keyboard was closed outside the app's toggle (e.g. Back); keep the toggle in sync. */
+    fun onKeyboardDismissed() {
+        toolbarControl.update { it.copy(isKeyboardBarVisible = false) }
     }
 
     fun toggleRealtimeAsciiMode() {

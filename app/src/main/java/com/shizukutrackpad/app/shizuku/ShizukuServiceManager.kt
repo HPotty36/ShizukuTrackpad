@@ -1,12 +1,14 @@
 package com.shizukutrackpad.app.shizuku
 
 import android.content.ComponentName
+import android.content.Context
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.IBinder
 import android.util.Log
 import com.shizukutrackpad.app.BuildConfig
 import com.shizukutrackpad.app.IInputInjectorService
+import com.shizukutrackpad.app.R
 import com.shizukutrackpad.app.data.DisplayTarget
 import com.shizukutrackpad.app.service.InputInjectorService
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,7 +37,9 @@ data class ShizukuState(
     val errorMessage: String? = null
 )
 
-class ShizukuServiceManager {
+class ShizukuServiceManager(context: Context) {
+
+    private val appContext = context.applicationContext
 
     private val _state = MutableStateFlow(ShizukuState())
     val state: StateFlow<ShizukuState> = _state.asStateFlow()
@@ -74,7 +78,7 @@ class ShizukuServiceManager {
                     it.copy(
                         status = ShizukuConnectionStatus.ERROR,
                         isServiceBound = false,
-                        errorMessage = "입력 서비스 연결이 올바르지 않습니다. 재연결해 주세요."
+                        errorMessage = appContext.getString(R.string.error_service_invalid)
                     )
                 }
                 return
@@ -125,7 +129,7 @@ class ShizukuServiceManager {
                 status = ShizukuConnectionStatus.SHIZUKU_NOT_RUNNING,
                 isBinderAlive = false,
                 isServiceBound = false,
-                errorMessage = "Shizuku 서비스가 종료되었습니다."
+                errorMessage = appContext.getString(R.string.error_shizuku_stopped)
             )
         }
     }
@@ -142,7 +146,7 @@ class ShizukuServiceManager {
                         } else {
                             ShizukuConnectionStatus.PERMISSION_REQUIRED
                         },
-                        errorMessage = if (granted) null else "Shizuku 권한이 거부되었습니다."
+                        errorMessage = if (granted) null else appContext.getString(R.string.error_permission_denied)
                     )
                 }
                 if (granted) {
@@ -175,7 +179,7 @@ class ShizukuServiceManager {
                 it.copy(
                     status = ShizukuConnectionStatus.SHIZUKU_NOT_RUNNING,
                     isBinderAlive = false,
-                    errorMessage = "Shizuku 앱이 실행 중인지 확인해 주세요."
+                    errorMessage = appContext.getString(R.string.error_shizuku_not_running)
                 )
             }
             return
@@ -185,7 +189,7 @@ class ShizukuServiceManager {
             _state.update {
                 it.copy(
                     status = ShizukuConnectionStatus.ERROR,
-                    errorMessage = "Shizuku v11 이상이 필요합니다."
+                    errorMessage = appContext.getString(R.string.error_shizuku_outdated)
                 )
             }
             return
@@ -235,7 +239,7 @@ class ShizukuServiceManager {
                 it.copy(
                     status = ShizukuConnectionStatus.ERROR,
                     isServiceBound = false,
-                    errorMessage = "입력 서비스를 시작하지 못했습니다. 재연결해 주세요."
+                    errorMessage = appContext.getString(R.string.error_service_bind_failed)
                 )
             }
         }
@@ -461,7 +465,7 @@ class ShizukuServiceManager {
     private fun handleIpcFailure(t: Throwable) {
         Log.e(TAG, "AIDL call failed", t)
         _state.update {
-            it.copy(errorMessage = "IPC 오류: ${t.message}")
+            it.copy(errorMessage = appContext.getString(R.string.error_ipc))
         }
     }
 

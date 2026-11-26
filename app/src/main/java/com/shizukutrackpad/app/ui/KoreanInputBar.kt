@@ -6,12 +6,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -26,7 +29,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -36,6 +41,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -47,11 +54,20 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.shizukutrackpad.app.R
+import com.shizukutrackpad.app.ui.theme.TrackpadRadius
 import com.shizukutrackpad.app.ui.theme.TrackpadTokens
+import com.shizukutrackpad.app.ui.theme.TrackpadType
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 
 private const val REALTIME_SENTINEL = "\u200B"
+
+// Lets the 35ms focus hand-off and IME show finish after a mode switch before watching for a dismissal.
+private const val IME_SETTLE_MS = 300L
+
+// Ignores a brief hide/show of the IME (e.g. the hidden field re-acquiring focus).
+private const val IME_DISMISS_DEBOUNCE_MS = 250L
 
 /**
  * Streamlined dual-mode soft keyboard bridge:
@@ -61,10 +77,12 @@ private const val REALTIME_SENTINEL = "\u200B"
  * 2. Korean Input Bar Mode (isRealtimeAsciiMode = false): single-line 48dp recessed hardware strip
  *    ([한/EN] toggle + inset black field + Send button, disabled while empty).
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun KoreanInputBar(
     visible: Boolean,
     isRealtimeAsciiMode: Boolean,
+    onImeDismissed: () -> Unit,
     onToggleRealtimeMode: () -> Unit,
     onAutoSwitchToKoreanBar: () -> Unit,
     onSendPasteText: (String) -> Unit,
@@ -91,11 +109,17 @@ fun KoreanInputBar(
         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
     }
 
-    LaunchedEffect(isRealtimeAsciiMode, visible) {
+    // Popups (display menu), the settings sheet, permission dialogs and Home all take window focus
+    // and hide the IME. Re-run on refocus so typing resumes where it left off.
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
+    val latestWindowFocused by rememberUpdatedState(windowFocused)
+
+    LaunchedEffect(isRealtimeAsciiMode, visible, windowFocused) {
         if (!visible) {
             keyboardController?.hide()
             return@LaunchedEffect
         }
+        if (!windowFocused) return@LaunchedEffect
         if (isRealtimeAsciiMode) {
             if (fieldValue.text != REALTIME_SENTINEL) {
                 fieldValue = TextFieldValue(REALTIME_SENTINEL, TextRange(1))
@@ -107,6 +131,26 @@ fun KoreanInputBar(
         delay(35L)
         runCatching { focusRequester.requestFocus() }
         keyboardController?.show()
+    }
+
+    // In hidden direct-EN mode the top-bar keyboard toggle is the only sign that typing is "on".
+    // When the user closes the system keyboard (Back / swipe) while the app keeps window focus,
+    // switch the toggle off as well, so the next tap on it brings the keyboard back instead of
+    // "turning off" a hidden one. Losing window focus (menu, sheet, dialog, Home) is not a dismissal.
+    val imeVisible by rememberUpdatedState(WindowInsets.isImeVisible)
+    val latestOnImeDismissed by rememberUpdatedState(onImeDismissed)
+    LaunchedEffect(visible, isRealtimeAsciiMode) {
+        if (!visible || !isRealtimeAsciiMode) return@LaunchedEffect
+        delay(IME_SETTLE_MS)
+        while (true) {
+            snapshotFlow { imeVisible }.first { it }
+            snapshotFlow { imeVisible }.first { !it }
+            delay(IME_DISMISS_DEBOUNCE_MS)
+            if (!imeVisible && latestWindowFocused) {
+                latestOnImeDismissed()
+                break
+            }
+        }
     }
 
     if (!visible) return
@@ -174,7 +218,7 @@ fun KoreanInputBar(
             singleLine = true,
             textStyle = TextStyle(
                 color = TrackpadTokens.InkPrimary,
-                fontSize = 14.sp
+                fontSize = TrackpadType.Body
             ),
             cursorBrush = SolidColor(TrackpadTokens.AccentSignal),
             keyboardOptions = KeyboardOptions(
@@ -199,6 +243,8 @@ fun KoreanInputBar(
         }
     } else {
         val hasPendingText = fieldValue.text.replace(REALTIME_SENTINEL, "").isNotEmpty()
+        val koreanModeDescription = stringResource(R.string.input_mode_korean_description)
+        val switchToEnglishLabel = stringResource(R.string.input_switch_to_english)
         Column(
             modifier = modifier
                 .fillMaxWidth()
@@ -216,22 +262,22 @@ fun KoreanInputBar(
                     modifier = Modifier
                         .width(44.dp)
                         .height(40.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(role = Role.Button) {
+                        .clip(RoundedCornerShape(TrackpadRadius.S))
+                        .clickable(role = Role.Button, onClickLabel = switchToEnglishLabel) {
                             triggerHaptic()
                             onToggleRealtimeMode()
                         }
                         .semantics {
-                            contentDescription = "한글 입력창 사용 중. 탭하면 영문 직접 입력으로 전환"
+                            contentDescription = koreanModeDescription
                         },
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(TrackpadRadius.S),
                     color = TrackpadTokens.KeycapSurface,
                     border = BorderStroke(1.dp, TrackpadTokens.KeycapBorder)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Text(
-                            text = "한",
-                            fontSize = 14.sp,
+                            text = stringResource(R.string.input_mode_korean_label),
+                            fontSize = TrackpadType.Body,
                             modifier = Modifier.clearAndSetSemantics { },
                             fontWeight = FontWeight.SemiBold,
                             color = TrackpadTokens.AccentSignal
@@ -243,16 +289,16 @@ fun KoreanInputBar(
                     modifier = Modifier
                         .weight(1f)
                         .height(40.dp)
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(TrackpadRadius.S))
                         .background(TrackpadTokens.ChassisBlack)
-                        .border(1.dp, TrackpadTokens.KeycapBorder, RoundedCornerShape(8.dp))
+                        .border(1.dp, TrackpadTokens.KeycapBorder, RoundedCornerShape(TrackpadRadius.S))
                         .padding(horizontal = 10.dp),
                     contentAlignment = Alignment.CenterStart
                 ) {
                     if (fieldValue.text.replace(REALTIME_SENTINEL, "").isEmpty()) {
                         Text(
-                            text = "외장 화면에 보낼 글자 입력",
-                            fontSize = 14.sp,
+                            text = stringResource(R.string.input_placeholder),
+                            fontSize = TrackpadType.Body,
                             color = TrackpadTokens.InkMuted,
                             maxLines = 1
                         )
@@ -263,9 +309,9 @@ fun KoreanInputBar(
                 Surface(
                     modifier = Modifier
                         .height(40.dp)
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(TrackpadRadius.S))
                         .clickable(enabled = hasPendingText, role = Role.Button) { submitCurrentInput() },
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(TrackpadRadius.S),
                     color = if (hasPendingText) TrackpadTokens.InkPrimary else TrackpadTokens.SurfacePressed
                 ) {
                     Box(
@@ -273,8 +319,8 @@ fun KoreanInputBar(
                         modifier = Modifier.padding(horizontal = 16.dp)
                     ) {
                         Text(
-                            text = "전송",
-                            fontSize = 14.sp,
+                            text = stringResource(R.string.input_send),
+                            fontSize = TrackpadType.Body,
                             fontWeight = FontWeight.SemiBold,
                             color = if (hasPendingText) TrackpadTokens.InkInverse else TrackpadTokens.InkSecondary
                         )
