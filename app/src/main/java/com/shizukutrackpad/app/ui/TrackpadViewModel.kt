@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 
 enum class StickyModifier {
@@ -87,9 +88,13 @@ class TrackpadViewModel(application: Application) : AndroidViewModel(application
     private val virtualKeyMap: KeyCharacterMap =
         KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD)
 
+    private val settingsStore = TrackpadSettingsStore(application)
+
     private val selectedDisplayId = MutableStateFlow<Int?>(null)
-    private val settings = MutableStateFlow(TrackpadSettings())
-    private val toolbarControl = MutableStateFlow(ToolbarControlState())
+    private val settings = MutableStateFlow(settingsStore.loadSettings())
+    private val toolbarControl = MutableStateFlow(
+        ToolbarControlState(isShortcutToolbarExpanded = settingsStore.loadShortcutTrayExpanded())
+    )
     private var userManuallySelectedDefault = false
 
     val uiState: StateFlow<TrackpadUiState> = combine(
@@ -171,19 +176,31 @@ class TrackpadViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun setSensitivity(value: Float) {
-        settings.update { it.copy(sensitivity = value.coerceIn(0.5f, 3.0f)) }
+        updateSettings {
+            it.copy(
+                sensitivity = value.coerceIn(
+                    TrackpadSettingsStore.MIN_SENSITIVITY,
+                    TrackpadSettingsStore.MAX_SENSITIVITY
+                )
+            )
+        }
     }
 
     fun setNaturalScroll(enabled: Boolean) {
-        settings.update { it.copy(naturalScroll = enabled) }
+        updateSettings { it.copy(naturalScroll = enabled) }
     }
 
     fun setShowPhysicalButtons(enabled: Boolean) {
-        settings.update { it.copy(showPhysicalButtons = enabled) }
+        updateSettings { it.copy(showPhysicalButtons = enabled) }
     }
 
     fun setKeepScreenOn(enabled: Boolean) {
-        settings.update { it.copy(keepScreenOn = enabled) }
+        updateSettings { it.copy(keepScreenOn = enabled) }
+    }
+
+    private inline fun updateSettings(transform: (TrackpadSettings) -> TrackpadSettings) {
+        val updated = settings.updateAndGet(transform)
+        settingsStore.saveSettings(updated)
     }
 
     fun onTrackpadMove(dx: Float, dy: Float) {
@@ -233,11 +250,19 @@ class TrackpadViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun toggleShortcutToolbar() {
-        toolbarControl.update { it.copy(isShortcutToolbarExpanded = !it.isShortcutToolbarExpanded) }
+        val updated = toolbarControl.updateAndGet {
+            it.copy(isShortcutToolbarExpanded = !it.isShortcutToolbarExpanded)
+        }
+        settingsStore.saveShortcutTrayExpanded(updated.isShortcutToolbarExpanded)
     }
 
     fun toggleKeyboardBar() {
         toolbarControl.update { it.copy(isKeyboardBarVisible = !it.isKeyboardBarVisible) }
+    }
+
+    /** The system keyboard was closed outside the app's toggle (e.g. Back); keep the toggle in sync. */
+    fun onKeyboardDismissed() {
+        toolbarControl.update { it.copy(isKeyboardBarVisible = false) }
     }
 
     fun toggleRealtimeAsciiMode() {

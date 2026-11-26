@@ -4,6 +4,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /**
  * Achromatic anodized-graphite + true OLED black hardware palette.
@@ -45,6 +47,26 @@ object TrackpadTokens {
     // Warn LED variant for light (InkPrimary) pills
     val LedWarnOnLight = Color(0xFFB45309)
     val LedError = Color(0xFFEF4444)
+}
+
+/**
+ * Type scale. Interactive and informative text never goes below [Caption] (12sp);
+ * [Micro] is reserved for the decorative cursor-coordinate readout, which is hidden from screen readers.
+ */
+object TrackpadType {
+    val Micro = 9.sp
+    val Tag = 11.sp
+    val Caption = 12.sp
+    val Label = 13.sp
+    val Body = 14.sp
+    val Title = 16.sp
+}
+
+/** Corner radii: S for controls and keycaps, M for large buttons, L for the trackpad monolith. */
+object TrackpadRadius {
+    val S = 8.dp
+    val M = 12.dp
+    val L = 16.dp
 }
 
 private val HardwareDarkColors = darkColorScheme(

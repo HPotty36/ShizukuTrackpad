@@ -2,6 +2,7 @@ package com.shizukutrackpad.app.ui
 
 import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
+import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -43,6 +44,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -53,10 +55,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.TextUnit
+import com.shizukutrackpad.app.R
+import com.shizukutrackpad.app.ui.theme.TrackpadRadius
 import com.shizukutrackpad.app.ui.theme.TrackpadTokens
+import com.shizukutrackpad.app.ui.theme.TrackpadType
 
-private val KeycapShape = RoundedCornerShape(8.dp)
+private val KeycapShape = RoundedCornerShape(TrackpadRadius.S)
 private val KeycapFaceHeight = 38.dp
 private val KeycapSkirtHeight = 2.dp
 
@@ -77,12 +82,12 @@ private data class KeySpec(
     val keyCode: Int = 0,
     val metaState: Int = 0,
     val sticky: StickyModifier? = null,
-    val description: String? = null,
+    @StringRes val descriptionRes: Int? = null,
     /** Minimum width when the row scrolls (wide layout). */
     val minWidth: Dp = 40.dp,
     /** Share of the row width when the row is distributed (portrait layout). */
     val weight: Float = 1f,
-    val fontSize: Int = 13
+    val fontSize: TextUnit = TrackpadType.Label
 )
 
 private sealed interface TrayItem
@@ -96,22 +101,22 @@ private val MetaMeta = KeyEvent.META_META_ON or KeyEvent.META_META_LEFT_ON
 
 private val KeyEsc = KeySpec("Esc", KeyKind.ACTION, KeyEvent.KEYCODE_ESCAPE, minWidth = 44.dp, weight = 0.85f)
 private val KeyTab = KeySpec("Tab", KeyKind.ACTION, KeyEvent.KEYCODE_TAB, minWidth = 44.dp, weight = 0.85f)
-private val KeyCopy = KeySpec("Ctrl+C", KeyKind.ACTION, KeyEvent.KEYCODE_C, CtrlMeta, minWidth = 56.dp, weight = 1.25f, fontSize = 12)
-private val KeyPaste = KeySpec("Ctrl+V", KeyKind.ACTION, KeyEvent.KEYCODE_V, CtrlMeta, minWidth = 56.dp, weight = 1.25f, fontSize = 12)
-private val KeyAltTab = KeySpec("Alt+Tab", KeyKind.ACTION, KeyEvent.KEYCODE_TAB, AltMeta, minWidth = 62.dp, weight = 1.35f, fontSize = 12)
-private val KeyDesktop = KeySpec("Win+D", KeyKind.ACTION, KeyEvent.KEYCODE_D, MetaMeta, minWidth = 56.dp, weight = 1.25f, fontSize = 12)
+private val KeyCopy = KeySpec("Ctrl+C", KeyKind.ACTION, KeyEvent.KEYCODE_C, CtrlMeta, minWidth = 56.dp, weight = 1.25f, fontSize = TrackpadType.Caption)
+private val KeyPaste = KeySpec("Ctrl+V", KeyKind.ACTION, KeyEvent.KEYCODE_V, CtrlMeta, minWidth = 56.dp, weight = 1.25f, fontSize = TrackpadType.Caption)
+private val KeyAltTab = KeySpec("Alt+Tab", KeyKind.ACTION, KeyEvent.KEYCODE_TAB, AltMeta, minWidth = 62.dp, weight = 1.35f, fontSize = TrackpadType.Caption)
+private val KeyDesktop = KeySpec("Win+D", KeyKind.ACTION, KeyEvent.KEYCODE_D, MetaMeta, minWidth = 56.dp, weight = 1.25f, fontSize = TrackpadType.Caption)
 
-private val KeyCtrl = KeySpec("Ctrl", KeyKind.STICKY, sticky = StickyModifier.CTRL, minWidth = 44.dp, fontSize = 12)
-private val KeyAlt = KeySpec("Alt", KeyKind.STICKY, sticky = StickyModifier.ALT, minWidth = 40.dp, fontSize = 12)
-private val KeyShift = KeySpec("Shift", KeyKind.STICKY, sticky = StickyModifier.SHIFT, minWidth = 48.dp, weight = 1.2f, fontSize = 12)
-private val KeyWin = KeySpec("Win", KeyKind.STICKY, sticky = StickyModifier.WIN, minWidth = 42.dp, fontSize = 12)
+private val KeyCtrl = KeySpec("Ctrl", KeyKind.STICKY, sticky = StickyModifier.CTRL, minWidth = 44.dp, fontSize = TrackpadType.Caption)
+private val KeyAlt = KeySpec("Alt", KeyKind.STICKY, sticky = StickyModifier.ALT, minWidth = 40.dp, fontSize = TrackpadType.Caption)
+private val KeyShift = KeySpec("Shift", KeyKind.STICKY, sticky = StickyModifier.SHIFT, minWidth = 48.dp, weight = 1.2f, fontSize = TrackpadType.Caption)
+private val KeyWin = KeySpec("Win", KeyKind.STICKY, sticky = StickyModifier.WIN, minWidth = 42.dp, fontSize = TrackpadType.Caption)
 
-private val KeyLeft = KeySpec("←", KeyKind.NAV, KeyEvent.KEYCODE_DPAD_LEFT, description = "왼쪽 화살표", minWidth = 38.dp, weight = 0.9f)
-private val KeyUp = KeySpec("↑", KeyKind.NAV, KeyEvent.KEYCODE_DPAD_UP, description = "위쪽 화살표", minWidth = 38.dp, weight = 0.9f)
-private val KeyDown = KeySpec("↓", KeyKind.NAV, KeyEvent.KEYCODE_DPAD_DOWN, description = "아래쪽 화살표", minWidth = 38.dp, weight = 0.9f)
-private val KeyRight = KeySpec("→", KeyKind.NAV, KeyEvent.KEYCODE_DPAD_RIGHT, description = "오른쪽 화살표", minWidth = 38.dp, weight = 0.9f)
-private val KeyBackspace = KeySpec("⌫", KeyKind.NAV, KeyEvent.KEYCODE_DEL, description = "백스페이스", minWidth = 42.dp, weight = 1.05f)
-private val KeyEnter = KeySpec("↵", KeyKind.NAV, KeyEvent.KEYCODE_ENTER, description = "엔터", minWidth = 44.dp, weight = 1.1f)
+private val KeyLeft = KeySpec("←", KeyKind.NAV, KeyEvent.KEYCODE_DPAD_LEFT, descriptionRes = R.string.key_left_arrow, minWidth = 38.dp, weight = 0.9f)
+private val KeyUp = KeySpec("↑", KeyKind.NAV, KeyEvent.KEYCODE_DPAD_UP, descriptionRes = R.string.key_up_arrow, minWidth = 38.dp, weight = 0.9f)
+private val KeyDown = KeySpec("↓", KeyKind.NAV, KeyEvent.KEYCODE_DPAD_DOWN, descriptionRes = R.string.key_down_arrow, minWidth = 38.dp, weight = 0.9f)
+private val KeyRight = KeySpec("→", KeyKind.NAV, KeyEvent.KEYCODE_DPAD_RIGHT, descriptionRes = R.string.key_right_arrow, minWidth = 38.dp, weight = 0.9f)
+private val KeyBackspace = KeySpec("⌫", KeyKind.NAV, KeyEvent.KEYCODE_DEL, descriptionRes = R.string.key_backspace, minWidth = 42.dp, weight = 1.05f)
+private val KeyEnter = KeySpec("↵", KeyKind.NAV, KeyEvent.KEYCODE_ENTER, descriptionRes = R.string.key_enter, minWidth = 44.dp, weight = 1.1f)
 
 // Backspace is fenced off from the arrows and kept apart from Enter so a mis-tap never sends Enter.
 private val EditingCluster: List<TrayItem> = listOf(
@@ -299,6 +304,9 @@ private fun HardwareKeycap(
     val pressed by interactionSource.collectIsPressedAsState()
     val isSticky = spec.kind == KeyKind.STICKY
     val sunk = pressed || active
+    val latchedLabel = stringResource(R.string.sticky_latched)
+    val releasedLabel = stringResource(R.string.sticky_released)
+    val description = spec.descriptionRes?.let { stringResource(it) }
 
     val faceColor = when {
         active -> TrackpadTokens.InkPrimary
@@ -317,10 +325,9 @@ private fun HardwareKeycap(
                 onValueChange = { onClick() }
             )
             .semantics {
-                stateDescription = if (active) "고정됨 (다음 키에 1회 적용)" else "해제됨"
+                stateDescription = if (active) latchedLabel else releasedLabel
             }
     } else {
-        val description = spec.description
         Modifier
             .clickable(
                 interactionSource = interactionSource,
@@ -346,7 +353,7 @@ private fun HardwareKeycap(
                         color = TrackpadTokens.KeycapSkirt,
                         topLeft = Offset(0f, KeycapSkirtHeight.toPx()),
                         size = Size(size.width, size.height - KeycapSkirtHeight.toPx()),
-                        cornerRadius = CornerRadius(8.dp.toPx(), 8.dp.toPx())
+                        cornerRadius = CornerRadius(TrackpadRadius.S.toPx(), TrackpadRadius.S.toPx())
                     )
                 }
             }
@@ -372,7 +379,7 @@ private fun HardwareKeycap(
             ) {
                 Text(
                     text = spec.label,
-                    fontSize = spec.fontSize.sp,
+                    fontSize = spec.fontSize,
                     fontFamily = FontFamily.SansSerif,
                     fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
                     color = if (active) TrackpadTokens.InkInverse else TrackpadTokens.InkPrimary,
@@ -380,7 +387,7 @@ private fun HardwareKeycap(
                     softWrap = false,
                     overflow = TextOverflow.Clip,
                     // Glyph keys are announced via their description instead of the raw symbol
-                    modifier = if (spec.description != null) {
+                    modifier = if (description != null) {
                         Modifier.clearAndSetSemantics { }
                     } else {
                         Modifier

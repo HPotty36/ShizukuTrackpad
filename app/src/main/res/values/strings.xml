@@ -1,3 +1,84 @@
 <resources>
     <string name="app_name">Shizuku Trackpad</string>
+
+    <!-- Connection status (top strip) -->
+    <string name="status_connected_description">입력 서비스 연결됨</string>
+    <string name="action_request_permission">권한 요청</string>
+    <string name="action_check_again">다시 확인</string>
+    <string name="status_connecting">연결 중</string>
+    <string name="action_reconnect">재연결</string>
+
+    <!-- Display selector -->
+    <string name="display_tag_none">없음</string>
+    <string name="display_tag_external">외장</string>
+    <string name="display_tag_internal">기본</string>
+    <string name="display_none">디스플레이 없음</string>
+    <string name="display_change_action">디스플레이 변경</string>
+    <string name="display_target_description">입력 대상: %1$s 디스플레이 %2$s, %3$d×%4$d</string>
+    <string name="display_target_none_description">입력 대상 디스플레이 없음</string>
+    <string name="display_selected">선택됨</string>
+    <string name="display_refresh">디스플레이 목록 새로고침</string>
+
+    <!-- Top-bar utilities -->
+    <string name="input_mode_english_description">영문 직접 입력 중. 탭하면 한글 입력창으로 전환</string>
+    <string name="keyboard">키보드</string>
+    <string name="shortcut_tray_collapse">단축키 툴바 접기</string>
+    <string name="shortcut_tray_expand">단축키 툴바 펼치기</string>
+    <string name="trackpad_settings">트랙패드 설정</string>
+    <string name="state_on">켜짐</string>
+    <string name="state_off">꺼짐</string>
+
+    <!-- Trackpad canvas -->
+    <string name="drag_active">드래그 중</string>
+    <string name="notice_permission_title">Shizuku 권한이 필요합니다</string>
+    <string name="notice_permission_helper">권한을 허용하면 트랙패드를 바로 쓸 수 있습니다</string>
+    <string name="notice_not_running_title">Shizuku가 실행 중이 아닙니다</string>
+    <string name="notice_not_running_helper">Shizuku 앱에서 서비스를 시작한 뒤 다시 확인을 누르세요</string>
+    <string name="notice_connecting_title">입력 서비스 연결 중…</string>
+    <string name="notice_error_title">입력 서비스에 연결하지 못했습니다</string>
+    <string name="hint_internal_with_external">기본 화면에 입력 중 · 상단에서 외장 모니터 선택</string>
+    <string name="hint_no_external">외장 모니터 미연결 · 기본 화면에 입력 중</string>
+
+    <!-- Clickpad floor -->
+    <string name="clickpad_left_description">왼쪽 클릭 버튼, 길게 누르면 끌기</string>
+    <string name="clickpad_right_description">오른쪽 클릭 버튼</string>
+
+    <!-- Settings sheet -->
+    <string name="settings_title">설정</string>
+    <string name="settings_sensitivity">포인터 감도</string>
+    <string name="settings_natural_scroll">자연스러운 스크롤</string>
+    <string name="settings_natural_scroll_on">손가락을 움직인 방향으로 화면이 스크롤</string>
+    <string name="settings_natural_scroll_off">일반 마우스 휠 방향으로 스크롤</string>
+    <string name="settings_clickpad">하단 클릭 버튼 (L / R)</string>
+    <string name="settings_clickpad_subtitle">트랙패드 아래 좌/우 버튼 영역 · L을 길게 눌러 끌기</string>
+    <string name="settings_keep_screen_on">화면 꺼짐 방지</string>
+    <string name="settings_keep_screen_on_subtitle">앱을 쓰는 동안 휴대폰 화면 켜짐 유지</string>
+    <string name="settings_gestures">제스처</string>
+    <string name="gesture_one_finger">1손가락 탭 / 드래그</string>
+    <string name="gesture_one_finger_action">좌클릭 / 커서 이동</string>
+    <string name="gesture_two_finger">2손가락 탭 / 드래그</string>
+    <string name="gesture_two_finger_action">우클릭 / 상하·좌우 스크롤</string>
+    <string name="gesture_double_tap_drag">더블탭 후 드래그</string>
+    <string name="gesture_double_tap_drag_action">창 이동 / 텍스트 선택</string>
+    <string name="gesture_left_hold">L 버튼 길게 누르기</string>
+    <string name="gesture_left_hold_action">누른 채 끌기</string>
+    <string name="gesture_sticky_modifiers" translatable="false">Ctrl · Alt · Shift · Win</string>
+    <string name="gesture_sticky_modifiers_action">다음 키 1회에 적용</string>
+    <string name="settings_reset_cursor">커서를 화면 중앙으로</string>
+
+    <!-- Shortcut tray -->
+    <string name="key_left_arrow">왼쪽 화살표</string>
+    <string name="key_up_arrow">위쪽 화살표</string>
+    <string name="key_down_arrow">아래쪽 화살표</string>
+    <string name="key_right_arrow">오른쪽 화살표</string>
+    <string name="key_backspace">백스페이스</string>
+    <string name="key_enter">엔터</string>
+    <string name="sticky_latched">고정됨 (다음 키에 1회 적용)</string>
+    <string name="sticky_released">해제됨</string>
+
+    <!-- Korean input bar -->
+    <string name="input_mode_korean_description">한글 입력창 사용 중. 탭하면 영문 직접 입력으로 전환</string>
+    <string name="input_mode_korean_label">한</string>
+    <string name="input_placeholder">외장 화면에 보낼 글자 입력</string>
+    <string name="input_send">전송</string>
 </resources>

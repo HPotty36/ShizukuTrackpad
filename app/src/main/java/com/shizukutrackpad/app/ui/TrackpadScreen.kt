@@ -79,6 +79,7 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -91,10 +92,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.shizukutrackpad.app.R
 import com.shizukutrackpad.app.data.DisplayTarget
 import com.shizukutrackpad.app.shizuku.ShizukuConnectionStatus
+import com.shizukutrackpad.app.ui.theme.TrackpadRadius
 import com.shizukutrackpad.app.ui.theme.TrackpadTokens
+import com.shizukutrackpad.app.ui.theme.TrackpadType
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -172,6 +175,7 @@ fun TrackpadScreen(viewModel: TrackpadViewModel) {
         KoreanInputBar(
             visible = uiState.isKeyboardBarVisible,
             isRealtimeAsciiMode = uiState.isRealtimeAsciiMode,
+            onImeDismissed = viewModel::onKeyboardDismissed,
             onToggleRealtimeMode = viewModel::toggleRealtimeAsciiMode,
             onAutoSwitchToKoreanBar = { viewModel.setRealtimeAsciiMode(false) },
             onSendPasteText = viewModel::sendPasteText,
@@ -196,12 +200,12 @@ fun TrackpadScreen(viewModel: TrackpadViewModel) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(TrackpadRadius.L))
                     .background(TrackpadTokens.ChassisBlack)
                     .border(
                         width = if (isDragLockedUi) 2.dp else 1.dp,
                         color = monolithBorderColor,
-                        shape = RoundedCornerShape(16.dp)
+                        shape = RoundedCornerShape(TrackpadRadius.L)
                     )
             ) {
                 TrackpadCanvas(
@@ -278,6 +282,8 @@ private fun HardwareTopStrip(
 ) {
     val view = LocalView.current
     var displayMenuExpanded by remember { mutableStateOf(false) }
+    val connectedDescription = stringResource(R.string.status_connected_description)
+    val englishModeDescription = stringResource(R.string.input_mode_english_description)
 
     val triggerHaptic: () -> Unit = {
         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -306,14 +312,20 @@ private fun HardwareTopStrip(
                             .size(6.dp)
                             .clip(CircleShape)
                             .background(TrackpadTokens.LedOnline)
-                            .semantics { contentDescription = "입력 서비스 연결됨" }
+                            .semantics { contentDescription = connectedDescription }
                     )
                 }
 
                 ShizukuConnectionStatus.PERMISSION_REQUIRED,
                 ShizukuConnectionStatus.SHIZUKU_NOT_RUNNING -> {
                     StatusPill(
-                        label = if (status == ShizukuConnectionStatus.PERMISSION_REQUIRED) "권한 요청" else "다시 확인",
+                        label = stringResource(
+                            if (status == ShizukuConnectionStatus.PERMISSION_REQUIRED) {
+                                R.string.action_request_permission
+                            } else {
+                                R.string.action_check_again
+                            }
+                        ),
                         ledColor = if (status == ShizukuConnectionStatus.PERMISSION_REQUIRED) {
                             TrackpadTokens.LedWarnOnLight
                         } else {
@@ -330,7 +342,7 @@ private fun HardwareTopStrip(
                 ShizukuConnectionStatus.CONNECTING -> {
                     // Binding is already in progress: informative only, not tappable
                     StatusPill(
-                        label = "연결 중",
+                        label = stringResource(R.string.status_connecting),
                         ledColor = TrackpadTokens.LedWarn,
                         emphasized = false,
                         onClick = null
@@ -339,7 +351,7 @@ private fun HardwareTopStrip(
 
                 ShizukuConnectionStatus.ERROR -> {
                     StatusPill(
-                        label = "재연결",
+                        label = stringResource(R.string.action_reconnect),
                         ledColor = TrackpadTokens.LedError,
                         emphasized = false,
                         onClick = {
@@ -358,33 +370,32 @@ private fun HardwareTopStrip(
                 contentAlignment = Alignment.CenterStart
             ) {
                 val displayTag = when {
-                    selectedDisplay == null -> "없음"
-                    selectedDisplay.isExternal -> "외장"
-                    else -> "기본"
+                    selectedDisplay == null -> stringResource(R.string.display_tag_none)
+                    selectedDisplay.isExternal -> stringResource(R.string.display_tag_external)
+                    else -> stringResource(R.string.display_tag_internal)
                 }
                 val displayText = selectedDisplay?.let {
                     "D${it.displayId} · ${it.width}×${it.height}"
-                } ?: "디스플레이 없음"
+                } ?: stringResource(R.string.display_none)
+                val displayDescription = selectedDisplay?.let {
+                    stringResource(R.string.display_target_description, displayTag, it.label, it.width, it.height)
+                } ?: stringResource(R.string.display_target_none_description)
 
                 Box(
                     modifier = Modifier
                         .fillMaxHeight()
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(role = Role.Button, onClickLabel = "디스플레이 변경") {
+                        .clip(RoundedCornerShape(TrackpadRadius.S))
+                        .clickable(role = Role.Button, onClickLabel = stringResource(R.string.display_change_action)) {
                             triggerHaptic()
                             displayMenuExpanded = true
                         }
-                        .semantics {
-                            contentDescription = selectedDisplay?.let {
-                                "입력 대상: $displayTag 디스플레이 ${it.label}, ${it.width}×${it.height}"
-                            } ?: "입력 대상 디스플레이 없음"
-                        },
+                        .semantics { contentDescription = displayDescription },
                     contentAlignment = Alignment.CenterStart
                 ) {
                     Row(
                         modifier = Modifier
                             .height(32.dp)
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(TrackpadRadius.S))
                             .background(TrackpadTokens.KeycapModifier)
                             .padding(horizontal = 8.dp)
                             .clearAndSetSemantics { },
@@ -393,7 +404,7 @@ private fun HardwareTopStrip(
                     ) {
                         Text(
                             text = displayTag,
-                            fontSize = 11.sp,
+                            fontSize = TrackpadType.Tag,
                             fontWeight = FontWeight.Bold,
                             color = if (selectedDisplay?.isExternal == true) {
                                 TrackpadTokens.InkPrimary
@@ -404,7 +415,7 @@ private fun HardwareTopStrip(
                         )
                         Text(
                             text = displayText,
-                            fontSize = 12.sp,
+                            fontSize = TrackpadType.Caption,
                             fontFamily = FontFamily.Monospace,
                             color = TrackpadTokens.InkPrimary,
                             maxLines = 1,
@@ -413,7 +424,7 @@ private fun HardwareTopStrip(
                         )
                         Text(
                             text = "▾",
-                            fontSize = 12.sp,
+                            fontSize = TrackpadType.Caption,
                             color = TrackpadTokens.InkMuted
                         )
                     }
@@ -444,12 +455,13 @@ private fun HardwareTopStrip(
                             },
                             trailingIcon = {
                                 if (isSelected) {
+                                    val selectedLabel = stringResource(R.string.display_selected)
                                     Text(
                                         text = "✓",
-                                        fontSize = 16.sp,
+                                        fontSize = TrackpadType.Title,
                                         fontWeight = FontWeight.Bold,
                                         color = TrackpadTokens.AccentSignal,
-                                        modifier = Modifier.semantics { contentDescription = "선택됨" }
+                                        modifier = Modifier.semantics { contentDescription = selectedLabel }
                                     )
                                 }
                             },
@@ -463,10 +475,10 @@ private fun HardwareTopStrip(
                     DropdownMenuItem(
                         text = {
                             Text(
-                                text = "디스플레이 목록 새로고침",
+                                text = stringResource(R.string.display_refresh),
                                 color = TrackpadTokens.AccentSignal,
                                 fontWeight = FontWeight.Medium,
-                                fontSize = 14.sp
+                                fontSize = TrackpadType.Body
                             )
                         },
                         onClick = {
@@ -483,13 +495,13 @@ private fun HardwareTopStrip(
                     Box(
                         modifier = Modifier
                             .fillMaxHeight()
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(TrackpadRadius.S))
                             .clickable(role = Role.Button) {
                                 triggerHaptic()
                                 onToggleRealtimeMode()
                             }
                             .semantics {
-                                contentDescription = "영문 직접 입력 중. 탭하면 한글 입력창으로 전환"
+                                contentDescription = englishModeDescription
                             }
                             .padding(horizontal = 2.dp),
                         contentAlignment = Alignment.Center
@@ -498,7 +510,7 @@ private fun HardwareTopStrip(
                             modifier = Modifier
                                 .heightIn(min = 32.dp)
                                 .clearAndSetSemantics { },
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(TrackpadRadius.S),
                             color = TrackpadTokens.KeycapSurface
                         ) {
                             Box(
@@ -507,7 +519,7 @@ private fun HardwareTopStrip(
                             ) {
                                 Text(
                                     text = "EN",
-                                    fontSize = 12.sp,
+                                    fontSize = TrackpadType.Caption,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Monospace,
                                     color = TrackpadTokens.AccentSignal
@@ -520,7 +532,7 @@ private fun HardwareTopStrip(
                 ChromeIconButton(
                     active = isKeyboardActive,
                     showSignalDot = false,
-                    description = "키보드",
+                    description = stringResource(R.string.keyboard),
                     toggleState = isKeyboardActive,
                     onClick = {
                         triggerHaptic()
@@ -535,7 +547,7 @@ private fun HardwareTopStrip(
                     active = false,
                     subtleActive = isShortcutExpanded,
                     showSignalDot = !isShortcutExpanded && hasLatchedModifier,
-                    description = if (isShortcutExpanded) "단축키 툴바 접기" else "단축키 툴바 펼치기",
+                    description = if (isShortcutExpanded) stringResource(R.string.shortcut_tray_collapse) else stringResource(R.string.shortcut_tray_expand),
                     onClick = {
                         triggerHaptic()
                         onToggleShortcutTray()
@@ -551,7 +563,7 @@ private fun HardwareTopStrip(
                 ChromeIconButton(
                     active = false,
                     showSignalDot = false,
-                    description = "트랙패드 설정",
+                    description = stringResource(R.string.trackpad_settings),
                     onClick = {
                         triggerHaptic()
                         onOpenSettings()
@@ -567,7 +579,7 @@ private fun HardwareTopStrip(
             Text(
                 text = errorMessage,
                 color = TrackpadTokens.LedError,
-                fontSize = 12.sp,
+                fontSize = TrackpadType.Caption,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 6.dp)
@@ -592,7 +604,7 @@ private fun StatusPill(
 ) {
     val touchModifier = if (onClick != null) {
         Modifier
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(TrackpadRadius.S))
             .clickable(role = Role.Button, onClick = onClick)
     } else {
         Modifier
@@ -607,7 +619,7 @@ private fun StatusPill(
     ) {
         Surface(
             modifier = Modifier.heightIn(min = 32.dp),
-            shape = RoundedCornerShape(8.dp),
+            shape = RoundedCornerShape(TrackpadRadius.S),
             color = if (emphasized) TrackpadTokens.InkPrimary else TrackpadTokens.KeycapSurface
         ) {
             Row(
@@ -623,7 +635,7 @@ private fun StatusPill(
                 )
                 Text(
                     text = label,
-                    fontSize = 12.sp,
+                    fontSize = TrackpadType.Caption,
                     fontWeight = FontWeight.SemiBold,
                     color = if (emphasized) TrackpadTokens.InkInverse else TrackpadTokens.InkPrimary,
                     maxLines = 1
@@ -648,6 +660,8 @@ private fun ChromeIconButton(
         subtleActive -> TrackpadTokens.SurfacePressed
         else -> TrackpadTokens.KeycapModifier
     }
+    val onLabel = stringResource(R.string.state_on)
+    val offLabel = stringResource(R.string.state_off)
     val tintColor = when {
         active -> TrackpadTokens.InkInverse
         subtleActive -> TrackpadTokens.InkPrimary
@@ -658,7 +672,7 @@ private fun ChromeIconButton(
     Box(
         modifier = Modifier
             .size(44.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(TrackpadRadius.M))
             .clickable(
                 role = if (toggleState != null) Role.Switch else Role.Button,
                 onClick = onClick
@@ -666,7 +680,7 @@ private fun ChromeIconButton(
             .semantics {
                 contentDescription = description
                 if (toggleState != null) {
-                    stateDescription = if (toggleState) "켜짐" else "꺼짐"
+                    stateDescription = if (toggleState) onLabel else offLabel
                 }
             },
         contentAlignment = Alignment.Center
@@ -674,7 +688,7 @@ private fun ChromeIconButton(
         Box(
             modifier = Modifier
                 .size(32.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(TrackpadRadius.S))
                 .background(bgColor)
         ) {
             Box(modifier = Modifier.align(Alignment.Center)) {
@@ -1075,8 +1089,8 @@ private fun TrackpadCanvas(
                             .background(TrackpadTokens.AccentSignal)
                     )
                     Text(
-                        text = "드래그 중",
-                        fontSize = 12.sp,
+                        text = stringResource(R.string.drag_active),
+                        fontSize = TrackpadType.Caption,
                         fontWeight = FontWeight.Bold,
                         color = TrackpadTokens.AccentSignal
                     )
@@ -1085,7 +1099,7 @@ private fun TrackpadCanvas(
 
             Text(
                 text = "${cursorX.roundToInt()}, ${cursorY.roundToInt()}",
-                fontSize = 9.sp,
+                fontSize = TrackpadType.Micro,
                 fontFamily = FontFamily.Monospace,
                 color = TrackpadTokens.InkSecondary,
                 // Decorative readout: hidden from screen readers
@@ -1099,30 +1113,30 @@ private fun TrackpadCanvas(
         // Connected but not on an external monitor: a quiet hint, so input never silently lands on the phone.
         val notice: CanvasNotice? = when (status) {
             ShizukuConnectionStatus.PERMISSION_REQUIRED -> CanvasNotice(
-                title = "Shizuku 권한이 필요합니다",
-                helper = "권한을 허용하면 트랙패드를 바로 쓸 수 있습니다",
-                actionLabel = "권한 요청",
+                title = stringResource(R.string.notice_permission_title),
+                helper = stringResource(R.string.notice_permission_helper),
+                actionLabel = stringResource(R.string.action_request_permission),
                 onAction = onRequestPermission
             )
 
             ShizukuConnectionStatus.SHIZUKU_NOT_RUNNING -> CanvasNotice(
-                title = "Shizuku가 실행 중이 아닙니다",
-                helper = "Shizuku 앱에서 서비스를 시작한 뒤 다시 확인을 누르세요",
-                actionLabel = "다시 확인",
+                title = stringResource(R.string.notice_not_running_title),
+                helper = stringResource(R.string.notice_not_running_helper),
+                actionLabel = stringResource(R.string.action_check_again),
                 onAction = onRequestPermission
             )
 
             ShizukuConnectionStatus.CONNECTING -> CanvasNotice(
-                title = "입력 서비스 연결 중…",
+                title = stringResource(R.string.notice_connecting_title),
                 helper = null,
                 actionLabel = null,
                 onAction = null
             )
 
             ShizukuConnectionStatus.ERROR -> CanvasNotice(
-                title = "입력 서비스에 연결하지 못했습니다",
+                title = stringResource(R.string.notice_error_title),
                 helper = null,
-                actionLabel = "재연결",
+                actionLabel = stringResource(R.string.action_reconnect),
                 onAction = onReconnect
             )
 
@@ -1139,7 +1153,7 @@ private fun TrackpadCanvas(
             ) {
                 Text(
                     text = notice.title,
-                    fontSize = 16.sp,
+                    fontSize = TrackpadType.Title,
                     fontWeight = FontWeight.SemiBold,
                     color = TrackpadTokens.InkPrimary,
                     textAlign = TextAlign.Center
@@ -1147,7 +1161,7 @@ private fun TrackpadCanvas(
                 if (notice.helper != null) {
                     Text(
                         text = notice.helper,
-                        fontSize = 13.sp,
+                        fontSize = TrackpadType.Label,
                         color = TrackpadTokens.InkSecondary,
                         textAlign = TextAlign.Center
                     )
@@ -1155,7 +1169,7 @@ private fun TrackpadCanvas(
                 if (!errorMessage.isNullOrBlank()) {
                     Text(
                         text = errorMessage,
-                        fontSize = 13.sp,
+                        fontSize = TrackpadType.Label,
                         color = TrackpadTokens.LedError,
                         textAlign = TextAlign.Center,
                         maxLines = 2,
@@ -1167,9 +1181,9 @@ private fun TrackpadCanvas(
                     Surface(
                         modifier = Modifier
                             .heightIn(min = 48.dp)
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(TrackpadRadius.M))
                             .clickable(role = Role.Button, onClick = notice.onAction),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(TrackpadRadius.M),
                         color = TrackpadTokens.InkPrimary
                     ) {
                         Box(
@@ -1178,7 +1192,7 @@ private fun TrackpadCanvas(
                         ) {
                             Text(
                                 text = notice.actionLabel,
-                                fontSize = 14.sp,
+                                fontSize = TrackpadType.Body,
                                 fontWeight = FontWeight.SemiBold,
                                 color = TrackpadTokens.InkInverse
                             )
@@ -1202,11 +1216,11 @@ private fun TrackpadCanvas(
                 )
                 Text(
                     text = if (hasExternalDisplay) {
-                        "기본 화면에 입력 중 · 상단에서 외장 모니터 선택"
+                        stringResource(R.string.hint_internal_with_external)
                     } else {
-                        "외장 모니터 미연결 · 기본 화면에 입력 중"
+                        stringResource(R.string.hint_no_external)
                     },
-                    fontSize = 13.sp,
+                    fontSize = TrackpadType.Label,
                     color = TrackpadTokens.InkSecondary,
                     textAlign = TextAlign.Center
                 )
@@ -1236,6 +1250,8 @@ private fun IntegratedClickpadFloor(
 
     var leftPressed by remember { mutableStateOf(false) }
     var rightPressed by remember { mutableStateOf(false) }
+    val leftDescription = stringResource(R.string.clickpad_left_description)
+    val rightDescription = stringResource(R.string.clickpad_right_description)
 
     Column(modifier = Modifier.fillMaxWidth()) {
         // Visible edge separating touch canvas from the clickpad floor (L holds the mouse button on touch-down)
@@ -1262,7 +1278,7 @@ private fun IntegratedClickpadFloor(
                         if (leftPressed) TrackpadTokens.ClickpadPressed else TrackpadTokens.ClickpadFloor
                     )
                     .semantics {
-                        contentDescription = "왼쪽 클릭 버튼, 길게 누르면 끌기"
+                        contentDescription = leftDescription
                         role = Role.Button
                         onClick {
                             latestLeftDown()
@@ -1297,7 +1313,7 @@ private fun IntegratedClickpadFloor(
                 }
                 Text(
                     text = "L",
-                    fontSize = 13.sp,
+                    fontSize = TrackpadType.Label,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Medium,
                     color = if (leftPressed) TrackpadTokens.InkPrimary else TrackpadTokens.InkMuted,
@@ -1324,7 +1340,7 @@ private fun IntegratedClickpadFloor(
                         if (rightPressed) TrackpadTokens.ClickpadPressed else TrackpadTokens.ClickpadFloor
                     )
                     .semantics {
-                        contentDescription = "오른쪽 클릭 버튼"
+                        contentDescription = rightDescription
                         role = Role.Button
                         onClick {
                             latestRightClick()
@@ -1355,7 +1371,7 @@ private fun IntegratedClickpadFloor(
                 }
                 Text(
                     text = "R",
-                    fontSize = 13.sp,
+                    fontSize = TrackpadType.Label,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Medium,
                     color = if (rightPressed) TrackpadTokens.InkPrimary else TrackpadTokens.InkMuted,
@@ -1380,6 +1396,7 @@ private fun TrackpadSettingsBottomSheet(
     onResetCursor: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val sensitivityLabel = stringResource(R.string.settings_sensitivity)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1399,7 +1416,7 @@ private fun TrackpadSettingsBottomSheet(
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Text(
-                text = "설정",
+                text = stringResource(R.string.settings_title),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = TrackpadTokens.InkPrimary
@@ -1413,14 +1430,14 @@ private fun TrackpadSettingsBottomSheet(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "포인터 감도",
+                        text = sensitivityLabel,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium,
                         color = TrackpadTokens.InkPrimary
                     )
                     Text(
                         text = String.format(Locale.US, "%.1fx", settings.sensitivity),
-                        fontSize = 14.sp,
+                        fontSize = TrackpadType.Body,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.SemiBold,
                         color = TrackpadTokens.AccentSignal
@@ -1432,7 +1449,7 @@ private fun TrackpadSettingsBottomSheet(
                     valueRange = 0.5f..3.0f,
                     // Clean 0.1x increments
                     steps = 24,
-                    modifier = Modifier.semantics { contentDescription = "포인터 감도" },
+                    modifier = Modifier.semantics { contentDescription = sensitivityLabel },
                     colors = SliderDefaults.colors(
                         thumbColor = TrackpadTokens.InkPrimary,
                         activeTrackColor = TrackpadTokens.AccentSignal,
@@ -1445,30 +1462,30 @@ private fun TrackpadSettingsBottomSheet(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("0.5x", fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = TrackpadTokens.InkMuted)
-                    Text("3.0x", fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = TrackpadTokens.InkMuted)
+                    Text("0.5x", fontSize = TrackpadType.Caption, fontFamily = FontFamily.Monospace, color = TrackpadTokens.InkMuted)
+                    Text("3.0x", fontSize = TrackpadType.Caption, fontFamily = FontFamily.Monospace, color = TrackpadTokens.InkMuted)
                 }
             }
 
             HorizontalDivider(color = TrackpadTokens.Hairline)
 
             SettingSwitchRow(
-                title = "자연스러운 스크롤",
-                subtitle = if (settings.naturalScroll) "손가락을 움직인 방향으로 화면이 스크롤" else "일반 마우스 휠 방향으로 스크롤",
+                title = stringResource(R.string.settings_natural_scroll),
+                subtitle = if (settings.naturalScroll) stringResource(R.string.settings_natural_scroll_on) else stringResource(R.string.settings_natural_scroll_off),
                 checked = settings.naturalScroll,
                 onCheckedChange = onNaturalScrollChange
             )
 
             SettingSwitchRow(
-                title = "하단 클릭 버튼 (L / R)",
-                subtitle = "트랙패드 아래 좌/우 버튼 영역 · L을 길게 눌러 끌기",
+                title = stringResource(R.string.settings_clickpad),
+                subtitle = stringResource(R.string.settings_clickpad_subtitle),
                 checked = settings.showPhysicalButtons,
                 onCheckedChange = onShowPhysicalButtonsChange
             )
 
             SettingSwitchRow(
-                title = "화면 꺼짐 방지",
-                subtitle = "앱을 쓰는 동안 휴대폰 화면 켜짐 유지",
+                title = stringResource(R.string.settings_keep_screen_on),
+                subtitle = stringResource(R.string.settings_keep_screen_on_subtitle),
                 checked = settings.keepScreenOn,
                 onCheckedChange = onKeepScreenOnChange
             )
@@ -1478,35 +1495,35 @@ private fun TrackpadSettingsBottomSheet(
             // Concise gesture reference (moved off the silent trackpad floor)
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    text = "제스처",
-                    fontSize = 12.sp,
+                    text = stringResource(R.string.settings_gestures),
+                    fontSize = TrackpadType.Caption,
                     fontWeight = FontWeight.SemiBold,
                     color = TrackpadTokens.InkMuted
                 )
-                GestureGuideRow("1손가락 탭 / 드래그", "좌클릭 / 커서 이동")
-                GestureGuideRow("2손가락 탭 / 드래그", "우클릭 / 상하·좌우 스크롤")
-                GestureGuideRow("더블탭 후 드래그", "창 이동 / 텍스트 선택")
-                GestureGuideRow("L 버튼 길게 누르기", "누른 채 끌기")
-                GestureGuideRow("Ctrl · Alt · Shift · Win", "다음 키 1회에 적용")
+                GestureGuideRow(stringResource(R.string.gesture_one_finger), stringResource(R.string.gesture_one_finger_action))
+                GestureGuideRow(stringResource(R.string.gesture_two_finger), stringResource(R.string.gesture_two_finger_action))
+                GestureGuideRow(stringResource(R.string.gesture_double_tap_drag), stringResource(R.string.gesture_double_tap_drag_action))
+                GestureGuideRow(stringResource(R.string.gesture_left_hold), stringResource(R.string.gesture_left_hold_action))
+                GestureGuideRow(stringResource(R.string.gesture_sticky_modifiers), stringResource(R.string.gesture_sticky_modifiers_action))
             }
 
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp)
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(TrackpadRadius.M))
                     .clickable(role = Role.Button) {
                         onResetCursor()
                         onDismiss()
                     },
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(TrackpadRadius.M),
                 color = TrackpadTokens.KeycapSurface,
                 border = BorderStroke(1.dp, TrackpadTokens.KeycapBorder)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Text(
-                        text = "커서를 화면 중앙으로",
-                        fontSize = 14.sp,
+                        text = stringResource(R.string.settings_reset_cursor),
+                        fontSize = TrackpadType.Body,
                         fontWeight = FontWeight.Medium,
                         color = TrackpadTokens.InkPrimary
                     )
@@ -1524,7 +1541,7 @@ private fun GestureGuideRow(gesture: String, action: String) {
     ) {
         Text(
             text = gesture,
-            fontSize = 13.sp,
+            fontSize = TrackpadType.Label,
             color = TrackpadTokens.InkSecondary,
             modifier = Modifier
                 .weight(1f)
@@ -1532,7 +1549,7 @@ private fun GestureGuideRow(gesture: String, action: String) {
         )
         Text(
             text = action,
-            fontSize = 13.sp,
+            fontSize = TrackpadType.Label,
             color = TrackpadTokens.InkPrimary,
             textAlign = TextAlign.End
         )
@@ -1550,7 +1567,7 @@ private fun SettingSwitchRow(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 48.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(TrackpadRadius.S))
             .toggleable(
                 value = checked,
                 role = Role.Switch,
@@ -1573,7 +1590,7 @@ private fun SettingSwitchRow(
             )
             Text(
                 text = subtitle,
-                fontSize = 12.sp,
+                fontSize = TrackpadType.Caption,
                 color = TrackpadTokens.InkSecondary
             )
         }
