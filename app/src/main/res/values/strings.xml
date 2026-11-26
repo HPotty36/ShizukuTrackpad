@@ -86,6 +86,30 @@
     <string name="input_placeholder">모니터로 보낼 글자 입력</string>
     <string name="input_send">전송</string>
 
+    <!-- In-app update -->
+    <string name="settings_update_title">앱 업데이트</string>
+    <string name="settings_update_current">현재 %1$s</string>
+    <string name="update_check">업데이트 확인</string>
+    <string name="update_checking">GitHub에서 새 버전을 확인하는 중…</string>
+    <string name="update_up_to_date">최신 버전을 사용 중입니다.</string>
+    <string name="update_no_releases">아직 배포된 릴리스가 없습니다.</string>
+    <string name="update_unsupported">디버그 빌드는 앱 내 업데이트를 지원하지 않습니다.</string>
+    <string name="update_available_detail">새 버전(%1$s)을 받을 수 있습니다.</string>
+    <string name="update_banner_available">새 버전 %1$s 사용 가능</string>
+    <string name="update_action_install">업데이트</string>
+    <string name="update_action_download_install">다운로드 후 설치</string>
+    <string name="update_action_retry">다시 시도</string>
+    <string name="update_action_dismiss">업데이트 알림 닫기</string>
+    <string name="update_downloading">업데이트 다운로드 중 %1$d%%</string>
+    <string name="update_downloading_indeterminate">업데이트 다운로드 중…</string>
+    <string name="update_installing">시스템 설치 화면에서 업데이트를 확인해 주세요.</string>
+    <string name="update_error_network">업데이트 정보를 가져오지 못했습니다. 네트워크를 확인해 주세요.</string>
+    <string name="update_error_no_apk">최신 릴리스에 APK 파일이 없습니다.</string>
+    <string name="update_error_download">업데이트를 다운로드하지 못했습니다.</string>
+    <string name="update_error_invalid">받은 파일을 검증하지 못해 설치하지 않았습니다.</string>
+    <string name="update_error_signature">설치된 앱과 서명이 달라 업데이트할 수 없습니다. 앱을 삭제한 뒤 새 버전을 직접 설치해 주세요.</string>
+    <string name="update_error_install">업데이트 설치가 완료되지 않았습니다.</string>
+
     <!-- Service errors (full sentences end with a period) -->
     <string name="error_service_invalid">입력 서비스 연결이 올바르지 않습니다. 재연결해 주세요.</string>
     <string name="error_shizuku_stopped">Shizuku 서비스가 종료되었습니다.</string>

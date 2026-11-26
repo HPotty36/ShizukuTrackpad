@@ -27,10 +27,32 @@ Non-rooted Android (Kotlin, Jetpack Compose) app that turns your smartphone scre
 - Android 10 (API 29) or higher
 - [Shizuku](https://shizuku.rikka.app/) installed and running (Wireless Debugging or ADB, no root required)
 
+## Install
+
+Download the latest `ShizukuTrackpad-vX.Y.Z.apk` from [Releases](https://github.com/HPotty36/ShizukuTrackpad/releases), install it, start Shizuku, and grant permission from the top bar in the app.
+
+## In-app updates
+
+Release builds check GitHub Releases once a day on launch (and on demand from **Settings → 앱 업데이트**). When a newer version exists, a banner offers to download it; the APK is checked (size, SHA-256 digest, package name, versionCode, signing key) and handed to the Android system installer, where you confirm the update. The first time, Android asks you to allow installs from this app.
+
+Debug builds use the `com.shizukutrackpad.app.debug` package and do not self-update.
+
 ## Build
 
 ```bash
-./gradlew :app:clean :app:assembleDebug
+./gradlew :app:assembleDebug     # debug build, installs alongside the release app
+./gradlew :app:assembleRelease   # release build (signed when signing is configured)
 ```
 
-Install the generated debug APK at `app/build/outputs/apk/debug/app-debug.apk`, start Shizuku, and grant permission from the top bar in the app.
+Local release signing reads a git-ignored `keystore.properties` at the project root:
+
+```properties
+storeFile=/absolute/path/to/release.jks
+storePassword=...
+keyAlias=...
+keyPassword=...
+```
+
+## Releasing
+
+Push a tag such as `v1.2.0`. CI builds the release APK with `versionName` taken from the tag and `versionCode` from the workflow run number, signs it with the key stored in the repository secrets `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD`, and publishes it as a GitHub Release. Every release must use the same key, or installed apps cannot update.

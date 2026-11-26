@@ -1,7 +1,28 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+// Release signing: CI passes SIGNING_* environment variables; local builds read the
+// git-ignored keystore.properties at the project root. Without either, release builds
+// come out unsigned instead of silently falling back to a throwaway debug key.
+val localSigningProps = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.isFile) file.inputStream().use { load(it) }
+}
+
+fun signingValue(envName: String, propName: String): String? =
+    System.getenv(envName)?.takeIf { it.isNotBlank() }
+        ?: localSigningProps.getProperty(propName)?.takeIf { it.isNotBlank() }
+
+val releaseStoreFile = signingValue("SIGNING_STORE_FILE", "storeFile")
+
+// Version comes from gradle.properties; CI overrides it from the git tag (v1.2.3 -> 1.2.3).
+val appVersionName = providers.gradleProperty("appVersionName").getOrElse("1.0.0")
+val appVersionCode = providers.gradleProperty("appVersionCode").getOrElse("1").toInt()
+val updateRepo = providers.gradleProperty("updateRepo").getOrElse("")
 
 android {
     namespace = "com.shizukutrackpad.app"
@@ -11,12 +32,32 @@ android {
         applicationId = "com.shizukutrackpad.app"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
+
+        // owner/name of the GitHub repository whose Releases the in-app updater checks
+        buildConfigField("String", "UPDATE_REPO", "\"$updateRepo\"")
+    }
+
+    signingConfigs {
+        if (releaseStoreFile != null) {
+            create("release") {
+                storeFile = file(releaseStoreFile)
+                storePassword = signingValue("SIGNING_STORE_PASSWORD", "storePassword")
+                keyAlias = signingValue("SIGNING_KEY_ALIAS", "keyAlias")
+                keyPassword = signingValue("SIGNING_KEY_PASSWORD", "keyPassword")
+            }
+        }
     }
 
     buildTypes {
+        debug {
+            // Separate package so a debug build never collides with the release-signed app.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -55,4 +96,6 @@ dependencies {
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
     implementation("org.lsposed.hiddenapibypass:hiddenapibypass:4.3")
+
+    testImplementation("junit:junit:4.13.2")
 }

@@ -12,6 +12,9 @@ import com.shizukutrackpad.app.data.DisplayRepository
 import com.shizukutrackpad.app.data.DisplayTarget
 import com.shizukutrackpad.app.shizuku.ShizukuServiceManager
 import com.shizukutrackpad.app.shizuku.ShizukuState
+import com.shizukutrackpad.app.update.ReleaseInfo
+import com.shizukutrackpad.app.update.UpdateManager
+import com.shizukutrackpad.app.update.UpdateState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -90,6 +93,11 @@ class TrackpadViewModel(application: Application) : AndroidViewModel(application
         KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD)
 
     private val settingsStore = TrackpadSettingsStore(application)
+    private val updateManager = UpdateManager.get(application)
+
+    val updateState: StateFlow<UpdateState> = updateManager.state
+    val dismissedUpdateVersion: StateFlow<String?> = updateManager.dismissedVersion
+    val currentAppVersion: String = updateManager.currentVersion
 
     private val selectedDisplayId = MutableStateFlow<Int?>(null)
     private val settings = MutableStateFlow(settingsStore.loadSettings())
@@ -131,6 +139,7 @@ class TrackpadViewModel(application: Application) : AndroidViewModel(application
 
     init {
         shizukuManager.start()
+        updateManager.checkIfDue()
 
         viewModelScope.launch {
             displayRepository.displays.collect { displays ->
@@ -329,6 +338,18 @@ class TrackpadViewModel(application: Application) : AndroidViewModel(application
 
     fun sendRealtimeEnter() {
         sendKeyShortcut(KeyEvent.KEYCODE_ENTER, 0)
+    }
+
+    fun checkForUpdate() {
+        updateManager.checkNow()
+    }
+
+    fun startUpdate() {
+        updateManager.downloadAndInstall()
+    }
+
+    fun dismissUpdateBanner(release: ReleaseInfo) {
+        updateManager.dismissBanner(release)
     }
 
     override fun onCleared() {
