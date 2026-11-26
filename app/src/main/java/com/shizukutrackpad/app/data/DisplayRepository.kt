@@ -17,13 +17,7 @@ data class DisplayTarget(
     val width: Int,
     val height: Int,
     val isExternal: Boolean
-) {
-    val label: String
-        get() {
-            val tag = if (isExternal) "외장 모니터" else "기본 화면 (테스트용)"
-            return "ID $displayId · $tag (${width}×${height})"
-        }
-}
+)
 
 class DisplayRepository(context: Context) {
 

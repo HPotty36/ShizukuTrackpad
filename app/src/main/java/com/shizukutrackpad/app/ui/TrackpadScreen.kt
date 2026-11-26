@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.view.HapticFeedbackConstants
 import android.view.WindowManager
+import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
@@ -45,7 +46,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -253,6 +253,7 @@ fun TrackpadScreen(viewModel: TrackpadViewModel) {
             settings = uiState.settings,
             onDismiss = { showSettingsSheet = false },
             onSensitivityChange = viewModel::setSensitivity,
+            onSensitivityChangeFinished = viewModel::commitSensitivity,
             onNaturalScrollChange = viewModel::setNaturalScroll,
             onShowPhysicalButtonsChange = viewModel::setShowPhysicalButtons,
             onKeepScreenOnChange = viewModel::setKeepScreenOn,
@@ -284,6 +285,7 @@ private fun HardwareTopStrip(
     var displayMenuExpanded by remember { mutableStateOf(false) }
     val connectedDescription = stringResource(R.string.status_connected_description)
     val englishModeDescription = stringResource(R.string.input_mode_english_description)
+    val switchToKoreanLabel = stringResource(R.string.input_switch_to_korean)
 
     val triggerHaptic: () -> Unit = {
         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -369,16 +371,22 @@ private fun HardwareTopStrip(
                     .fillMaxHeight(),
                 contentAlignment = Alignment.CenterStart
             ) {
-                val displayTag = when {
-                    selectedDisplay == null -> stringResource(R.string.display_tag_none)
-                    selectedDisplay.isExternal -> stringResource(R.string.display_tag_external)
-                    else -> stringResource(R.string.display_tag_internal)
+                val displayTag = selectedDisplay?.let {
+                    stringResource(
+                        if (it.isExternal) R.string.display_tag_external else R.string.display_tag_internal
+                    )
                 }
                 val displayText = selectedDisplay?.let {
                     "D${it.displayId} · ${it.width}×${it.height}"
                 } ?: stringResource(R.string.display_none)
                 val displayDescription = selectedDisplay?.let {
-                    stringResource(R.string.display_target_description, displayTag, it.label, it.width, it.height)
+                    stringResource(
+                        R.string.display_target_description,
+                        stringResource(displayKindRes(it)),
+                        it.displayId,
+                        it.width,
+                        it.height
+                    )
                 } ?: stringResource(R.string.display_target_none_description)
 
                 Box(
@@ -402,17 +410,19 @@ private fun HardwareTopStrip(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text(
-                            text = displayTag,
-                            fontSize = TrackpadType.Tag,
-                            fontWeight = FontWeight.Bold,
-                            color = if (selectedDisplay?.isExternal == true) {
-                                TrackpadTokens.InkPrimary
-                            } else {
-                                TrackpadTokens.LedWarn
-                            },
-                            maxLines = 1
-                        )
+                        if (displayTag != null) {
+                            Text(
+                                text = displayTag,
+                                fontSize = TrackpadType.Tag,
+                                fontWeight = FontWeight.Bold,
+                                color = if (selectedDisplay?.isExternal == true) {
+                                    TrackpadTokens.InkPrimary
+                                } else {
+                                    TrackpadTokens.LedWarn
+                                },
+                                maxLines = 1
+                            )
+                        }
                         Text(
                             text = displayText,
                             fontSize = TrackpadType.Caption,
@@ -441,14 +451,20 @@ private fun HardwareTopStrip(
                             text = {
                                 Column {
                                     Text(
-                                        text = display.label,
-                                        style = MaterialTheme.typography.bodyMedium,
+                                        text = stringResource(
+                                            R.string.display_menu_item,
+                                            stringResource(displayKindRes(display)),
+                                            display.displayId,
+                                            display.width,
+                                            display.height
+                                        ),
+                                        fontSize = TrackpadType.Body,
                                         color = TrackpadTokens.InkPrimary,
                                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                                     )
                                     Text(
                                         text = display.name,
-                                        style = MaterialTheme.typography.bodySmall,
+                                        fontSize = TrackpadType.Caption,
                                         color = TrackpadTokens.InkSecondary
                                     )
                                 }
@@ -496,7 +512,7 @@ private fun HardwareTopStrip(
                         modifier = Modifier
                             .fillMaxHeight()
                             .clip(RoundedCornerShape(TrackpadRadius.S))
-                            .clickable(role = Role.Button) {
+                            .clickable(role = Role.Button, onClickLabel = switchToKoreanLabel) {
                                 triggerHaptic()
                                 onToggleRealtimeMode()
                             }
@@ -672,7 +688,8 @@ private fun ChromeIconButton(
     Box(
         modifier = Modifier
             .size(44.dp)
-            .clip(RoundedCornerShape(TrackpadRadius.M))
+            // Concentric with the 32dp visual: its 8dp radius + the 6dp inset
+            .clip(RoundedCornerShape(TrackpadRadius.S + 6.dp))
             .clickable(
                 role = if (toggleState != null) Role.Switch else Role.Button,
                 onClick = onClick
@@ -1229,6 +1246,10 @@ private fun TrackpadCanvas(
     }
 }
 
+@StringRes
+private fun displayKindRes(display: DisplayTarget): Int =
+    if (display.isExternal) R.string.display_kind_external else R.string.display_kind_internal
+
 private data class CanvasNotice(
     val title: String,
     val helper: String?,
@@ -1390,6 +1411,7 @@ private fun TrackpadSettingsBottomSheet(
     settings: TrackpadSettings,
     onDismiss: () -> Unit,
     onSensitivityChange: (Float) -> Unit,
+    onSensitivityChangeFinished: () -> Unit,
     onNaturalScrollChange: (Boolean) -> Unit,
     onShowPhysicalButtonsChange: (Boolean) -> Unit,
     onKeepScreenOnChange: (Boolean) -> Unit,
@@ -1417,7 +1439,7 @@ private fun TrackpadSettingsBottomSheet(
         ) {
             Text(
                 text = stringResource(R.string.settings_title),
-                style = MaterialTheme.typography.titleMedium,
+                fontSize = TrackpadType.Title,
                 fontWeight = FontWeight.SemiBold,
                 color = TrackpadTokens.InkPrimary
             )
@@ -1431,7 +1453,7 @@ private fun TrackpadSettingsBottomSheet(
                 ) {
                     Text(
                         text = sensitivityLabel,
-                        style = MaterialTheme.typography.bodyMedium,
+                        fontSize = TrackpadType.Body,
                         fontWeight = FontWeight.Medium,
                         color = TrackpadTokens.InkPrimary
                     )
@@ -1446,7 +1468,8 @@ private fun TrackpadSettingsBottomSheet(
                 Slider(
                     value = settings.sensitivity,
                     onValueChange = onSensitivityChange,
-                    valueRange = 0.5f..3.0f,
+                    onValueChangeFinished = onSensitivityChangeFinished,
+                    valueRange = TrackpadSettingsStore.MIN_SENSITIVITY..TrackpadSettingsStore.MAX_SENSITIVITY,
                     // Clean 0.1x increments
                     steps = 24,
                     modifier = Modifier.semantics { contentDescription = sensitivityLabel },
@@ -1462,8 +1485,18 @@ private fun TrackpadSettingsBottomSheet(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("0.5x", fontSize = TrackpadType.Caption, fontFamily = FontFamily.Monospace, color = TrackpadTokens.InkMuted)
-                    Text("3.0x", fontSize = TrackpadType.Caption, fontFamily = FontFamily.Monospace, color = TrackpadTokens.InkMuted)
+                    Text(
+                        text = String.format(Locale.US, "%.1fx", TrackpadSettingsStore.MIN_SENSITIVITY),
+                        fontSize = TrackpadType.Caption,
+                        fontFamily = FontFamily.Monospace,
+                        color = TrackpadTokens.InkMuted
+                    )
+                    Text(
+                        text = String.format(Locale.US, "%.1fx", TrackpadSettingsStore.MAX_SENSITIVITY),
+                        fontSize = TrackpadType.Caption,
+                        fontFamily = FontFamily.Monospace,
+                        color = TrackpadTokens.InkMuted
+                    )
                 }
             }
 
@@ -1584,7 +1617,7 @@ private fun SettingSwitchRow(
         ) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.bodyMedium,
+                fontSize = TrackpadType.Body,
                 fontWeight = FontWeight.Medium,
                 color = TrackpadTokens.InkPrimary
             )

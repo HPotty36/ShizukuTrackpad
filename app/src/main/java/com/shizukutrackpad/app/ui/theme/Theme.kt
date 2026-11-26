@@ -1,9 +1,11 @@
 package com.shizukutrackpad.app.ui.theme
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -62,7 +64,7 @@ object TrackpadType {
     val Title = 16.sp
 }
 
-/** Corner radii: S for controls and keycaps, M for large buttons, L for the trackpad monolith. */
+/** Corner radii: S for controls and keycaps, M for large (48dp) buttons, L for the trackpad monolith. */
 object TrackpadRadius {
     val S = 8.dp
     val M = 12.dp
@@ -86,10 +88,24 @@ private val HardwareDarkColors = darkColorScheme(
     onError = TrackpadTokens.InkPrimary
 )
 
+/**
+ * Text sizes come from [TrackpadType]. The Material base styles only supply the font, so drop their
+ * fixed line heights (e.g. bodyLarge's 24sp) and letter-spacing, which bloat and loosen small labels.
+ */
+private val HardwareTypography = Typography().let { base ->
+    base.copy(
+        bodyLarge = base.bodyLarge.copy(lineHeight = TextUnit.Unspecified, letterSpacing = 0.sp),
+        bodyMedium = base.bodyMedium.copy(lineHeight = TextUnit.Unspecified, letterSpacing = 0.sp),
+        bodySmall = base.bodySmall.copy(lineHeight = TextUnit.Unspecified, letterSpacing = 0.sp),
+        labelLarge = base.labelLarge.copy(lineHeight = TextUnit.Unspecified, letterSpacing = 0.sp)
+    )
+}
+
 @Composable
 fun ShizukuTrackpadTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = HardwareDarkColors,
+        typography = HardwareTypography,
         content = content
     )
 }

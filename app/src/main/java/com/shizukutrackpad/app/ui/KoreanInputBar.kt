@@ -41,6 +41,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -62,8 +63,11 @@ import kotlinx.coroutines.flow.first
 
 private const val REALTIME_SENTINEL = "\u200B"
 
-// Ignores the brief hide/show while the hidden field re-acquires focus after a mode switch.
-private const val IME_DISMISS_DEBOUNCE_MS = 400L
+// Lets the 35ms focus hand-off and IME show finish after a mode switch before watching for a dismissal.
+private const val IME_SETTLE_MS = 300L
+
+// Ignores a brief hide/show of the IME (e.g. the hidden field re-acquiring focus).
+private const val IME_DISMISS_DEBOUNCE_MS = 250L
 
 /**
  * Streamlined dual-mode soft keyboard bridge:
@@ -105,11 +109,17 @@ fun KoreanInputBar(
         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
     }
 
-    LaunchedEffect(isRealtimeAsciiMode, visible) {
+    // Popups (display menu), the settings sheet, permission dialogs and Home all take window focus
+    // and hide the IME. Re-run on refocus so typing resumes where it left off.
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
+    val latestWindowFocused by rememberUpdatedState(windowFocused)
+
+    LaunchedEffect(isRealtimeAsciiMode, visible, windowFocused) {
         if (!visible) {
             keyboardController?.hide()
             return@LaunchedEffect
         }
+        if (!windowFocused) return@LaunchedEffect
         if (isRealtimeAsciiMode) {
             if (fieldValue.text != REALTIME_SENTINEL) {
                 fieldValue = TextFieldValue(REALTIME_SENTINEL, TextRange(1))
@@ -124,17 +134,19 @@ fun KoreanInputBar(
     }
 
     // In hidden direct-EN mode the top-bar keyboard toggle is the only sign that typing is "on".
-    // When the user closes the system keyboard (Back / swipe), switch the toggle off as well,
-    // so the next tap on it brings the keyboard back instead of "turning off" a hidden one.
+    // When the user closes the system keyboard (Back / swipe) while the app keeps window focus,
+    // switch the toggle off as well, so the next tap on it brings the keyboard back instead of
+    // "turning off" a hidden one. Losing window focus (menu, sheet, dialog, Home) is not a dismissal.
     val imeVisible by rememberUpdatedState(WindowInsets.isImeVisible)
     val latestOnImeDismissed by rememberUpdatedState(onImeDismissed)
     LaunchedEffect(visible, isRealtimeAsciiMode) {
         if (!visible || !isRealtimeAsciiMode) return@LaunchedEffect
+        delay(IME_SETTLE_MS)
         while (true) {
             snapshotFlow { imeVisible }.first { it }
             snapshotFlow { imeVisible }.first { !it }
             delay(IME_DISMISS_DEBOUNCE_MS)
-            if (!imeVisible) {
+            if (!imeVisible && latestWindowFocused) {
                 latestOnImeDismissed()
                 break
             }
@@ -232,6 +244,7 @@ fun KoreanInputBar(
     } else {
         val hasPendingText = fieldValue.text.replace(REALTIME_SENTINEL, "").isNotEmpty()
         val koreanModeDescription = stringResource(R.string.input_mode_korean_description)
+        val switchToEnglishLabel = stringResource(R.string.input_switch_to_english)
         Column(
             modifier = modifier
                 .fillMaxWidth()
@@ -250,7 +263,7 @@ fun KoreanInputBar(
                         .width(44.dp)
                         .height(40.dp)
                         .clip(RoundedCornerShape(TrackpadRadius.S))
-                        .clickable(role = Role.Button) {
+                        .clickable(role = Role.Button, onClickLabel = switchToEnglishLabel) {
                             triggerHaptic()
                             onToggleRealtimeMode()
                         }

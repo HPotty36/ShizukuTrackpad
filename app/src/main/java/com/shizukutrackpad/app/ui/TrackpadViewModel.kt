@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 enum class StickyModifier {
     CTRL,
@@ -82,7 +83,7 @@ data class TrackpadUiState(
 class TrackpadViewModel(application: Application) : AndroidViewModel(application) {
 
     private val displayRepository = DisplayRepository(application)
-    private val shizukuManager = ShizukuServiceManager()
+    private val shizukuManager = ShizukuServiceManager(application)
     private val clipboardManager =
         application.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     private val virtualKeyMap: KeyCharacterMap =
@@ -120,7 +121,12 @@ class TrackpadViewModel(application: Application) : AndroidViewModel(application
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = TrackpadUiState()
+        // Seed the first frame with persisted values so a collapsed tray / hidden clickpad
+        // doesn't animate closed on every cold start.
+        initialValue = TrackpadUiState(
+            settings = settings.value,
+            isShortcutToolbarExpanded = toolbarControl.value.isShortcutToolbarExpanded
+        )
     )
 
     init {
@@ -175,15 +181,21 @@ class TrackpadViewModel(application: Application) : AndroidViewModel(application
         shizukuManager.bindService()
     }
 
+    /** Live slider updates: in memory only; [commitSensitivity] persists when the drag ends. */
     fun setSensitivity(value: Float) {
-        updateSettings {
+        val rounded = (value * 10f).roundToInt() / 10f
+        settings.update {
             it.copy(
-                sensitivity = value.coerceIn(
+                sensitivity = rounded.coerceIn(
                     TrackpadSettingsStore.MIN_SENSITIVITY,
                     TrackpadSettingsStore.MAX_SENSITIVITY
                 )
             )
         }
+    }
+
+    fun commitSensitivity() {
+        settingsStore.saveSettings(settings.value)
     }
 
     fun setNaturalScroll(enabled: Boolean) {
