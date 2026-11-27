@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.view.HapticFeedbackConstants
+import android.view.InputDevice
+import android.view.MotionEvent
 import android.view.WindowManager
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
@@ -65,6 +67,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
@@ -74,6 +77,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalConfiguration
@@ -95,6 +99,11 @@ import androidx.compose.ui.unit.dp
 import com.shizukutrackpad.app.R
 import com.shizukutrackpad.app.data.DisplayTarget
 import com.shizukutrackpad.app.shizuku.ShizukuConnectionStatus
+import com.shizukutrackpad.app.shizuku.ShizukuServiceManager
+import com.shizukutrackpad.app.shizuku.TOUCHPAD_LOGICAL_MAX
+import com.shizukutrackpad.app.shizuku.TOUCHPAD_PHYSICAL_SIZE_MM
+import com.shizukutrackpad.app.shizuku.TouchContact
+import com.shizukutrackpad.app.shizuku.TouchpadSystemSettings
 import com.shizukutrackpad.app.update.UpdateState
 import com.shizukutrackpad.app.ui.theme.TrackpadRadius
 import com.shizukutrackpad.app.ui.theme.TrackpadTokens
@@ -121,6 +130,8 @@ fun TrackpadScreen(viewModel: TrackpadViewModel) {
     val uiState by viewModel.uiState.collectAsState()
     val updateState by viewModel.updateState.collectAsState()
     val dismissedUpdateVersion by viewModel.dismissedUpdateVersion.collectAsState()
+    val touchpadSettings by viewModel.touchpadSettings.collectAsState()
+    val isTouchpadMode = uiState.shizuku.isTouchpadActive
     var showSettingsSheet by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
@@ -229,6 +240,8 @@ fun TrackpadScreen(viewModel: TrackpadViewModel) {
                     cursorX = uiState.shizuku.cursorX,
                     cursorY = uiState.shizuku.cursorY,
                     isDragLocked = isDragLockedUi,
+                    isTouchpadMode = isTouchpadMode,
+                    onTouchpadFrame = viewModel::onTouchpadFrame,
                     onDragLockChanged = { isDragLockedUi = it },
                     onRequestPermission = viewModel::requestShizukuPermission,
                     onReconnect = viewModel::reconnectService,
@@ -249,9 +262,9 @@ fun TrackpadScreen(viewModel: TrackpadViewModel) {
                 ) {
                     IntegratedClickpadFloor(
                         compact = isCompactHeight,
-                        onLeftButtonDown = viewModel::onBeginLeftDrag,
-                        onLeftButtonUp = viewModel::onEndLeftDrag,
-                        onRightClick = viewModel::onTwoFingerTap
+                        onLeftButtonDown = viewModel::onClickpadLeftDown,
+                        onLeftButtonUp = viewModel::onClickpadLeftUp,
+                        onRightClick = viewModel::onClickpadRightClick
                     )
                 }
             }
@@ -259,8 +272,15 @@ fun TrackpadScreen(viewModel: TrackpadViewModel) {
     }
 
     if (showSettingsSheet) {
+        LaunchedEffect(Unit) { viewModel.refreshTouchpadSettings() }
         TrackpadSettingsBottomSheet(
             settings = uiState.settings,
+            isTouchpadMode = isTouchpadMode,
+            touchpadSettings = touchpadSettings ?: TouchpadSystemSettings(),
+            onTouchpadPointerSpeedChange = viewModel::setTouchpadPointerSpeed,
+            onTouchpadNaturalScrollingChange = viewModel::setTouchpadNaturalScrolling,
+            onTouchpadTapToClickChange = viewModel::setTouchpadTapToClick,
+            onTouchpadTapDraggingChange = viewModel::setTouchpadTapDragging,
             onDismiss = { showSettingsSheet = false },
             onSensitivityChange = viewModel::setSensitivity,
             onSensitivityChangeFinished = viewModel::commitSensitivity,
@@ -838,6 +858,7 @@ private fun SlidersVectorIcon(tint: Color, modifier: Modifier = Modifier) {
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun TrackpadCanvas(
     modifier: Modifier = Modifier,
@@ -848,6 +869,8 @@ private fun TrackpadCanvas(
     cursorX: Float,
     cursorY: Float,
     isDragLocked: Boolean,
+    isTouchpadMode: Boolean,
+    onTouchpadFrame: (List<TouchContact>) -> Unit,
     onDragLockChanged: (Boolean) -> Unit,
     onRequestPermission: () -> Unit,
     onReconnect: () -> Unit,
@@ -870,6 +893,38 @@ private fun TrackpadCanvas(
     val latestOnDragAndDropMove by rememberUpdatedState(onDragAndDropMove)
     val latestOnEndDragAndDrop by rememberUpdatedState(onEndDragAndDrop)
     val latestOnDragLockChanged by rememberUpdatedState(onDragLockChanged)
+    val latestOnTouchpadFrame by rememberUpdatedState(onTouchpadFrame)
+
+    // Touchpad mode: phone pixels -> touchpad units, so finger travel in mm matches a real pad.
+    val metrics = LocalContext.current.resources.displayMetrics
+    val unitsPerPxX = 25.4f / metrics.xdpi / TOUCHPAD_PHYSICAL_SIZE_MM * TOUCHPAD_LOGICAL_MAX
+    val unitsPerPxY = 25.4f / metrics.ydpi / TOUCHPAD_PHYSICAL_SIZE_MM * TOUCHPAD_LOGICAL_MAX
+    var touchPoints by remember { mutableStateOf<List<Offset>>(emptyList()) }
+    val touchSlots = remember { HashMap<Int, Int>() }
+    LaunchedEffect(isTouchpadMode) {
+        touchSlots.clear()
+        touchPoints = emptyList()
+    }
+    // Remembered so recomposition (e.g. finger dots) never resets the filter mid-gesture.
+    val touchpadInput = remember(isTouchpadMode, unitsPerPxX, unitsPerPxY) {
+        if (isTouchpadMode) {
+            // Forward raw fingers; Android's touchpad stack does pointer + gestures.
+            // Only touchscreen events count: the touchpad's own pointer can sit over
+            // this canvas (phone display) and its clicks must not loop back in.
+            Modifier.pointerInteropFilter { ev ->
+                if (!ev.isFromSource(InputDevice.SOURCE_TOUCHSCREEN)) return@pointerInteropFilter false
+                val frame = buildTouchpadFrame(ev, touchSlots, unitsPerPxX, unitsPerPxY)
+                if (frame.isNotEmpty()) latestOnTouchpadFrame(frame)
+                touchPoints = touchSlots.keys.mapNotNull { id ->
+                    val index = ev.findPointerIndex(id)
+                    if (index >= 0) Offset(ev.getX(index), ev.getY(index)) else null
+                }
+                true
+            }
+        } else {
+            Modifier
+        }
+    }
 
     var lastPulse by remember { mutableStateOf<TapPulseEvent?>(null) }
     var isCursorActive by remember { mutableStateOf(false) }
@@ -899,7 +954,9 @@ private fun TrackpadCanvas(
     Box(
         modifier = modifier
             .background(TrackpadTokens.ChassisBlack)
-            .pointerInput(Unit) {
+            .then(touchpadInput)
+            .pointerInput(isTouchpadMode) {
+                if (isTouchpadMode) return@pointerInput
                 val singleTapSlopPx = 12f
                 val singleTapTimeoutMs = 260L
                 val doubleTapWindowMs = 280L
@@ -1074,6 +1131,20 @@ private fun TrackpadCanvas(
                 y += spacing
             }
 
+            for (point in touchPoints) {
+                drawCircle(
+                    color = TrackpadTokens.InkPrimary.copy(alpha = 0.10f),
+                    radius = 22.dp.toPx(),
+                    center = point
+                )
+                drawCircle(
+                    color = TrackpadTokens.InkPrimary.copy(alpha = 0.35f),
+                    radius = 22.dp.toPx(),
+                    center = point,
+                    style = Stroke(width = 1.dp.toPx())
+                )
+            }
+
             val pulse = lastPulse
             if (pulse != null) {
                 val p = tapPulse.value
@@ -1128,7 +1199,7 @@ private fun TrackpadCanvas(
                 }
             }
 
-            Text(
+            if (!isTouchpadMode) Text(
                 text = "${cursorX.roundToInt()}, ${cursorY.roundToInt()}",
                 fontSize = TrackpadType.Micro,
                 fontFamily = FontFamily.Monospace,
@@ -1423,6 +1494,12 @@ private fun IntegratedClickpadFloor(
 @Composable
 private fun TrackpadSettingsBottomSheet(
     settings: TrackpadSettings,
+    isTouchpadMode: Boolean,
+    touchpadSettings: TouchpadSystemSettings,
+    onTouchpadPointerSpeedChange: (Int) -> Unit,
+    onTouchpadNaturalScrollingChange: (Boolean) -> Unit,
+    onTouchpadTapToClickChange: (Boolean) -> Unit,
+    onTouchpadTapDraggingChange: (Boolean) -> Unit,
     onDismiss: () -> Unit,
     onSensitivityChange: (Float) -> Unit,
     onSensitivityChangeFinished: () -> Unit,
@@ -1462,6 +1539,15 @@ private fun TrackpadSettingsBottomSheet(
                 color = TrackpadTokens.InkPrimary
             )
 
+            if (isTouchpadMode) {
+                TouchpadSystemSettingsSection(
+                    settings = touchpadSettings,
+                    onPointerSpeedChange = onTouchpadPointerSpeedChange,
+                    onNaturalScrollingChange = onTouchpadNaturalScrollingChange,
+                    onTapToClickChange = onTouchpadTapToClickChange,
+                    onTapDraggingChange = onTouchpadTapDraggingChange
+                )
+            } else {
             // Sensitivity slider (DPI 0.5x ~ 3.0x)
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(
@@ -1526,6 +1612,7 @@ private fun TrackpadSettingsBottomSheet(
                 checked = settings.naturalScroll,
                 onCheckedChange = onNaturalScrollChange
             )
+            }
 
             SettingSwitchRow(
                 title = stringResource(R.string.settings_clickpad),
@@ -1551,14 +1638,23 @@ private fun TrackpadSettingsBottomSheet(
                     fontWeight = FontWeight.SemiBold,
                     color = TrackpadTokens.InkMuted
                 )
-                GestureGuideRow(stringResource(R.string.gesture_one_finger), stringResource(R.string.gesture_one_finger_action))
-                GestureGuideRow(stringResource(R.string.gesture_two_finger), stringResource(R.string.gesture_two_finger_action))
-                GestureGuideRow(stringResource(R.string.gesture_double_tap_drag), stringResource(R.string.gesture_double_tap_drag_action))
+                if (isTouchpadMode) {
+                    GestureGuideRow(stringResource(R.string.gesture_one_finger), stringResource(R.string.gesture_one_finger_action))
+                    GestureGuideRow(stringResource(R.string.gesture_two_finger), stringResource(R.string.gesture_two_finger_action))
+                    GestureGuideRow(stringResource(R.string.gesture_pinch), stringResource(R.string.gesture_pinch_action))
+                    GestureGuideRow(stringResource(R.string.gesture_three_finger), stringResource(R.string.gesture_three_finger_action))
+                    GestureGuideRow(stringResource(R.string.gesture_four_finger), stringResource(R.string.gesture_four_finger_action))
+                } else {
+                    GestureGuideRow(stringResource(R.string.gesture_one_finger), stringResource(R.string.gesture_one_finger_action))
+                    GestureGuideRow(stringResource(R.string.gesture_two_finger), stringResource(R.string.gesture_two_finger_action))
+                    GestureGuideRow(stringResource(R.string.gesture_double_tap_drag), stringResource(R.string.gesture_double_tap_drag_action))
+                }
                 GestureGuideRow(stringResource(R.string.gesture_left_hold), stringResource(R.string.gesture_left_hold_action))
                 GestureGuideRow(stringResource(R.string.gesture_sticky_modifiers), stringResource(R.string.gesture_sticky_modifiers_action))
             }
 
-            Surface(
+            // The system pointer of the virtual touchpad is not ours to recenter.
+            if (!isTouchpadMode) Surface(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp)
@@ -1591,6 +1687,81 @@ private fun TrackpadSettingsBottomSheet(
             )
         }
     }
+}
+
+/** Android's own touchpad settings, applied system-wide like for a physical touchpad. */
+@Composable
+private fun TouchpadSystemSettingsSection(
+    settings: TouchpadSystemSettings,
+    onPointerSpeedChange: (Int) -> Unit,
+    onNaturalScrollingChange: (Boolean) -> Unit,
+    onTapToClickChange: (Boolean) -> Unit,
+    onTapDraggingChange: (Boolean) -> Unit
+) {
+    val speedLabel = stringResource(R.string.settings_touchpad_speed)
+    var speed by remember(settings.pointerSpeed) { mutableStateOf(settings.pointerSpeed.toFloat()) }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = speedLabel,
+                fontSize = TrackpadType.Body,
+                fontWeight = FontWeight.Medium,
+                color = TrackpadTokens.InkPrimary
+            )
+            Text(
+                text = String.format(Locale.US, "%+d", speed.roundToInt()),
+                fontSize = TrackpadType.Body,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.SemiBold,
+                color = TrackpadTokens.AccentSignal
+            )
+        }
+        Slider(
+            value = speed,
+            onValueChange = { speed = it },
+            onValueChangeFinished = { onPointerSpeedChange(speed.roundToInt()) },
+            valueRange = ShizukuServiceManager.MIN_POINTER_SPEED.toFloat()..ShizukuServiceManager.MAX_POINTER_SPEED.toFloat(),
+            steps = ShizukuServiceManager.MAX_POINTER_SPEED - ShizukuServiceManager.MIN_POINTER_SPEED - 1,
+            modifier = Modifier.semantics { contentDescription = speedLabel },
+            colors = SliderDefaults.colors(
+                thumbColor = TrackpadTokens.InkPrimary,
+                activeTrackColor = TrackpadTokens.AccentSignal,
+                inactiveTrackColor = TrackpadTokens.TrackInactive,
+                activeTickColor = Color.Transparent,
+                inactiveTickColor = Color.Transparent
+            )
+        )
+        Text(
+            text = stringResource(R.string.settings_touchpad_system_note),
+            fontSize = TrackpadType.Caption,
+            color = TrackpadTokens.InkMuted
+        )
+    }
+
+    HorizontalDivider(color = TrackpadTokens.Hairline)
+
+    SettingSwitchRow(
+        title = stringResource(R.string.settings_natural_scroll),
+        subtitle = if (settings.naturalScrolling) stringResource(R.string.settings_natural_scroll_on) else stringResource(R.string.settings_natural_scroll_off),
+        checked = settings.naturalScrolling,
+        onCheckedChange = onNaturalScrollingChange
+    )
+    SettingSwitchRow(
+        title = stringResource(R.string.settings_tap_to_click),
+        subtitle = stringResource(R.string.settings_tap_to_click_subtitle),
+        checked = settings.tapToClick,
+        onCheckedChange = onTapToClickChange
+    )
+    SettingSwitchRow(
+        title = stringResource(R.string.settings_tap_dragging),
+        subtitle = stringResource(R.string.settings_tap_dragging_subtitle),
+        checked = settings.tapDragging,
+        onCheckedChange = onTapDraggingChange
+    )
 }
 
 @Composable
@@ -1668,6 +1839,45 @@ private fun SettingSwitchRow(
         )
     }
 }
+
+/**
+ * Turns one touchscreen MotionEvent into a touchpad frame: every finger still down plus,
+ * once, each finger that lifted. [slots] maps MotionEvent pointer ids to contact ids 0..7.
+ */
+private fun buildTouchpadFrame(
+    ev: MotionEvent,
+    slots: HashMap<Int, Int>,
+    unitsPerPxX: Float,
+    unitsPerPxY: Float
+): List<TouchContact> {
+    val action = ev.actionMasked
+    val frame = ArrayList<TouchContact>(TOUCHPAD_MAX_CONTACTS)
+    for (i in 0 until ev.pointerCount) {
+        val pointerId = ev.getPointerId(i)
+        val lifted = action == MotionEvent.ACTION_UP ||
+            action == MotionEvent.ACTION_CANCEL ||
+            (action == MotionEvent.ACTION_POINTER_UP && i == ev.actionIndex)
+        var slot = slots[pointerId]
+        if (slot == null && !lifted) {
+            slot = (0 until TOUCHPAD_CONTACT_IDS).firstOrNull { it !in slots.values }
+            if (slot != null) slots[pointerId] = slot
+        }
+        if (lifted) slots.remove(pointerId)
+        if (slot == null || frame.size >= TOUCHPAD_MAX_CONTACTS) continue
+        frame += TouchContact(
+            id = slot,
+            x = (ev.getX(i) * unitsPerPxX).roundToInt().coerceIn(0, TOUCHPAD_LOGICAL_MAX),
+            y = (ev.getY(i) * unitsPerPxY).roundToInt().coerceIn(0, TOUCHPAD_LOGICAL_MAX),
+            tip = !lifted
+        )
+    }
+    if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) slots.clear()
+    return frame
+}
+
+/** Fingers per touchpad frame and distinct contact ids (matches VirtualTouchpad). */
+private const val TOUCHPAD_MAX_CONTACTS = 5
+private const val TOUCHPAD_CONTACT_IDS = 8
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this

@@ -42,6 +42,9 @@ class InputInjectorService : IInputInjectorService.Stub {
     private var dragDownTime: Long = 0L
     private var lastError: String = ""
 
+    private var touchpad: VirtualTouchpad? = null
+    private var touchpadDisplayId: Int = Int.MIN_VALUE
+
     private var inputManagerInstance: Any? = null
     private var injectInputEventMethod: Method? = null
     private var setDisplayIdMethod: Method? = null
@@ -123,8 +126,126 @@ class InputInjectorService : IInputInjectorService.Stub {
 
     override fun destroy() {
         Log.i(TAG, "Destroying InputInjectorService")
+        synchronized(stateLock) { stopTouchpadLocked() }
         exitProcess(0)
     }
+
+    // ---- Virtual touchpad ----
+
+    override fun startTouchpad(displayId: Int): Boolean {
+        synchronized(stateLock) {
+            targetDisplayId = displayId
+            val existing = touchpad
+            if (existing != null && existing.isOpen) {
+                associateTouchpadLocked(displayId)
+                return true
+            }
+            return try {
+                // Bind the port to the display first so the device is configured for it from the start.
+                associateTouchpadLocked(displayId)
+                val device = VirtualTouchpad(TOUCHPAD_PHYS)
+                device.create()
+                touchpad = device
+                if (!device.awaitStarted(TOUCHPAD_START_TIMEOUT_MS)) {
+                    Log.w(TAG, "uhid touchpad created but not started yet")
+                }
+                lastError = ""
+                true
+            } catch (t: Throwable) {
+                lastError = "Touchpad failed: ${t.javaClass.simpleName}: ${t.message}"
+                Log.e(TAG, lastError, t)
+                stopTouchpadLocked()
+                false
+            }
+        }
+    }
+
+    override fun stopTouchpad() {
+        synchronized(stateLock) { stopTouchpadLocked() }
+    }
+
+    override fun sendTouchpadFrame(
+        contactIds: IntArray,
+        xs: IntArray,
+        ys: IntArray,
+        tips: BooleanArray,
+        buttons: Int
+    ) {
+        val device = touchpad ?: return
+        val count = minOf(contactIds.size, xs.size, ys.size, tips.size)
+        val contacts = List(count) { i -> VirtualTouchpad.Contact(contactIds[i], xs[i], ys[i], tips[i]) }
+        device.sendFrame(contacts, buttons)
+    }
+
+    override fun getTouchpadSetting(key: String): String? {
+        if (key !in TOUCHPAD_SETTING_KEYS) return null
+        val output = runShell("settings", "get", "system", key)?.trim()
+        return output?.takeUnless { it.isEmpty() || it == "null" }
+    }
+
+    override fun putTouchpadSetting(key: String, value: String): Boolean {
+        if (key !in TOUCHPAD_SETTING_KEYS || !SETTING_VALUE.matches(value)) return false
+        return runShell("settings", "put", "system", key, value) != null
+    }
+
+    private fun stopTouchpadLocked() {
+        touchpad?.destroy()
+        touchpad = null
+        if (touchpadDisplayId != Int.MIN_VALUE) {
+            callInputManager(REMOVE_ASSOCIATION, TOUCHPAD_PHYS)
+            touchpadDisplayId = Int.MIN_VALUE
+        }
+    }
+
+    /** Pins the touchpad (and so its pointer) to displayId through its input port. */
+    private fun associateTouchpadLocked(displayId: Int) {
+        if (displayId == touchpadDisplayId) return
+        val uniqueId = displayUniqueId(displayId)
+        if (uniqueId == null) {
+            Log.w(TAG, "No uniqueId for display $displayId; pointer stays on the default display")
+            return
+        }
+        callInputManager(REMOVE_ASSOCIATION, TOUCHPAD_PHYS)
+        if (callInputManager(ADD_ASSOCIATION, TOUCHPAD_PHYS, uniqueId)) {
+            touchpadDisplayId = displayId
+            Log.i(TAG, "Touchpad bound to display $displayId ($uniqueId)")
+        }
+    }
+
+    private fun displayUniqueId(displayId: Int): String? = runCatching {
+        val globalClass = Class.forName("android.hardware.display.DisplayManagerGlobal")
+        val global = globalClass.getMethod("getInstance").invoke(null)
+        val info = globalClass.getMethod("getDisplayInfo", Int::class.javaPrimitiveType)
+            .invoke(global, displayId) ?: return null
+        info.javaClass.getField("uniqueId").get(info) as String?
+    }.onFailure { Log.w(TAG, "displayUniqueId failed: ${it.message}") }.getOrNull()
+
+    /** Calls the first IInputManager method in names that takes args.size Strings. */
+    private fun callInputManager(names: List<String>, vararg args: String): Boolean = runCatching {
+        val binder = Class.forName("android.os.ServiceManager")
+            .getMethod("getService", String::class.java)
+            .invoke(null, Context.INPUT_SERVICE) as IBinder
+        val service = Class.forName("android.hardware.input.IInputManager\$Stub")
+            .getMethod("asInterface", IBinder::class.java)
+            .invoke(null, binder) ?: return false
+        for (name in names) {
+            val method = service.javaClass.methods.firstOrNull { m ->
+                m.name == name && m.parameterTypes.size == args.size &&
+                    m.parameterTypes.all { it == String::class.java }
+            } ?: continue
+            method.invoke(service, *args)
+            return true
+        }
+        Log.w(TAG, "IInputManager has none of $names")
+        false
+    }.onFailure { Log.w(TAG, "IInputManager call ${names.first()} failed: ${it.cause ?: it}") }
+        .getOrDefault(false)
+
+    private fun runShell(vararg command: String): String? = runCatching {
+        val process = ProcessBuilder(*command).redirectErrorStream(true).start()
+        val output = process.inputStream.bufferedReader().use { it.readText() }
+        if (process.waitFor() == 0) output else null
+    }.getOrNull()
 
     override fun setTargetDisplay(displayId: Int, width: Int, height: Int) {
         synchronized(stateLock) {
@@ -147,8 +268,13 @@ class InputInjectorService : IInputInjectorService.Stub {
                 clampCursorLocked()
             }
 
-            // Send an initial hover event so the pointer appears on the target display
-            injectHoverMoveLocked(cursorX, cursorY, targetDisplayId)
+            if (touchpad?.isOpen == true) {
+                // The system pointer belongs to the virtual touchpad; move it with the display.
+                associateTouchpadLocked(displayId)
+            } else {
+                // Send an initial hover event so the pointer appears on the target display
+                injectHoverMoveLocked(cursorX, cursorY, targetDisplayId)
+            }
         }
     }
 
@@ -651,5 +777,19 @@ class InputInjectorService : IInputInjectorService.Stub {
     companion object {
         private const val TAG = "InputInjectorService"
         private const val INJECT_INPUT_EVENT_MODE_ASYNC = 0
+        private const val TOUCHPAD_PHYS = "shizukutrackpad/touchpad0"
+        private const val TOUCHPAD_START_TIMEOUT_MS = 3_000L
+        private val ADD_ASSOCIATION = listOf("addUniqueIdAssociationByPort", "addUniqueIdAssociation")
+        private val REMOVE_ASSOCIATION = listOf("removeUniqueIdAssociationByPort", "removeUniqueIdAssociation")
+        private val SETTING_VALUE = Regex("-?\\d{1,2}")
+
+        /** System settings Android reads for every touchpad (Settings > System > Touchpad). */
+        private val TOUCHPAD_SETTING_KEYS = setOf(
+            "touchpad_pointer_speed",
+            "touchpad_natural_scrolling",
+            "touchpad_tap_to_click",
+            "touchpad_tap_dragging",
+            "touchpad_right_click_zone"
+        )
     }
 }

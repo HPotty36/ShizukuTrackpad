@@ -30,4 +30,19 @@ interface IInputInjectorService {
     void dragMove(float dx, float dy) = 14;
 
     void endLeftDrag() = 15;
+
+    // ---- Virtual touchpad (uhid) ----
+
+    /** Creates the virtual touchpad (if needed) and binds its pointer to displayId. */
+    boolean startTouchpad(int displayId) = 17;
+
+    void stopTouchpad() = 18;
+
+    /** One frame: every finger on the surface plus each just-lifted finger (tip = false). */
+    oneway void sendTouchpadFrame(in int[] contactIds, in int[] xs, in int[] ys, in boolean[] tips, int buttons) = 19;
+
+    /** Reads a touchpad_* system setting; returns null when unset. */
+    String getTouchpadSetting(String key) = 20;
+
+    boolean putTouchpadSetting(String key, String value) = 21;
 }

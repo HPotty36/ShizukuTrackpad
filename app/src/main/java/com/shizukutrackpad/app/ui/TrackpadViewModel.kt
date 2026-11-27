@@ -12,6 +12,10 @@ import com.shizukutrackpad.app.data.DisplayRepository
 import com.shizukutrackpad.app.data.DisplayTarget
 import com.shizukutrackpad.app.shizuku.ShizukuServiceManager
 import com.shizukutrackpad.app.shizuku.ShizukuState
+import com.shizukutrackpad.app.shizuku.TOUCHPAD_BUTTON_LEFT
+import com.shizukutrackpad.app.shizuku.TOUCHPAD_BUTTON_RIGHT
+import com.shizukutrackpad.app.shizuku.TouchContact
+import com.shizukutrackpad.app.shizuku.TouchpadSystemSettings
 import com.shizukutrackpad.app.update.ReleaseInfo
 import com.shizukutrackpad.app.update.UpdateManager
 import com.shizukutrackpad.app.update.UpdateState
@@ -98,6 +102,10 @@ class TrackpadViewModel(application: Application) : AndroidViewModel(application
     val updateState: StateFlow<UpdateState> = updateManager.state
     val dismissedUpdateVersion: StateFlow<String?> = updateManager.dismissedVersion
     val currentAppVersion: String = updateManager.currentVersion
+    val touchpadSettings: StateFlow<TouchpadSystemSettings?> = shizukuManager.touchpadSettings
+
+    private val isTouchpadActive: Boolean
+        get() = shizukuManager.state.value.isTouchpadActive
 
     private val selectedDisplayId = MutableStateFlow<Int?>(null)
     private val settings = MutableStateFlow(settingsStore.loadSettings())
@@ -264,6 +272,55 @@ class TrackpadViewModel(application: Application) : AndroidViewModel(application
     fun onEndLeftDrag() {
         shizukuManager.endLeftDrag()
         shizukuManager.syncCursorFromService()
+    }
+
+    /** Raw touches for the virtual touchpad; Android turns them into pointer and gestures. */
+    fun onTouchpadFrame(contacts: List<TouchContact>) {
+        shizukuManager.sendTouchFrame(contacts)
+    }
+
+    fun onClickpadLeftDown() {
+        if (isTouchpadActive) shizukuManager.setTouchpadButton(TOUCHPAD_BUTTON_LEFT, true) else onBeginLeftDrag()
+    }
+
+    fun onClickpadLeftUp() {
+        if (isTouchpadActive) shizukuManager.setTouchpadButton(TOUCHPAD_BUTTON_LEFT, false) else onEndLeftDrag()
+    }
+
+    fun onClickpadRightClick() {
+        if (isTouchpadActive) {
+            shizukuManager.setTouchpadButton(TOUCHPAD_BUTTON_RIGHT, true)
+            shizukuManager.setTouchpadButton(TOUCHPAD_BUTTON_RIGHT, false)
+        } else {
+            onTwoFingerTap()
+        }
+    }
+
+    fun refreshTouchpadSettings() {
+        shizukuManager.refreshTouchpadSettings()
+    }
+
+    fun setTouchpadPointerSpeed(speed: Int) {
+        shizukuManager.updateTouchpadSettings {
+            it.copy(
+                pointerSpeed = speed.coerceIn(
+                    ShizukuServiceManager.MIN_POINTER_SPEED,
+                    ShizukuServiceManager.MAX_POINTER_SPEED
+                )
+            )
+        }
+    }
+
+    fun setTouchpadNaturalScrolling(enabled: Boolean) {
+        shizukuManager.updateTouchpadSettings { it.copy(naturalScrolling = enabled) }
+    }
+
+    fun setTouchpadTapToClick(enabled: Boolean) {
+        shizukuManager.updateTouchpadSettings { it.copy(tapToClick = enabled) }
+    }
+
+    fun setTouchpadTapDragging(enabled: Boolean) {
+        shizukuManager.updateTouchpadSettings { it.copy(tapDragging = enabled) }
     }
 
     fun resetCursorToCenter() {

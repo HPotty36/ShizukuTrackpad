@@ -67,6 +67,18 @@
     <string name="gesture_left_hold_action">누른 채 드래그</string>
     <string name="gesture_sticky_modifiers" translatable="false">Ctrl · Alt · Shift · Win</string>
     <string name="gesture_sticky_modifiers_action">다음 키에 한 번 적용</string>
+    <string name="gesture_pinch">두 손가락 오므리기 / 벌리기</string>
+    <string name="gesture_pinch_action">축소 / 확대</string>
+    <string name="gesture_three_finger">세 손가락 위 · 좌우 스와이프</string>
+    <string name="gesture_three_finger_action">홈 · 최근 앱 / 뒤로</string>
+    <string name="gesture_four_finger">네 손가락 좌우 스와이프</string>
+    <string name="gesture_four_finger_action">앱 전환</string>
+    <string name="settings_touchpad_speed">포인터 속도</string>
+    <string name="settings_touchpad_system_note">가상 터치패드 사용 중 · Android 설정의 터치패드 옵션과 같은 값입니다.</string>
+    <string name="settings_tap_to_click">탭하여 클릭</string>
+    <string name="settings_tap_to_click_subtitle">한 손가락 탭 = 클릭 · 두 손가락 탭 = 오른쪽 클릭</string>
+    <string name="settings_tap_dragging">탭하여 드래그</string>
+    <string name="settings_tap_dragging_subtitle">두 번 탭한 뒤 손가락을 떼지 않고 움직여 드래그</string>
     <string name="settings_reset_cursor">커서를 모니터 중앙으로 이동</string>
 
     <!-- Shortcut tray -->
