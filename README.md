@@ -31,6 +31,12 @@ Non-rooted Android (Kotlin, Jetpack Compose) app that turns your smartphone scre
 
 Download the latest `ShizukuTrackpad-vX.Y.Z.apk` from [Releases](https://github.com/HPotty36/ShizukuTrackpad/releases), install it, start Shizuku, and grant permission from the top bar in the app.
 
+## Virtual touchpad (external displays)
+
+When an external display is selected, the app creates a virtual HID precision touchpad through `/dev/uhid` (from the Shizuku UserService, which runs as the shell user) and binds it to that display. Raw finger positions from the phone screen are forwarded as touchpad frames, so Android handles everything exactly as for a physically connected touchpad: the system mouse pointer, pointer acceleration, tap to click, two-finger scroll with fling, pinch zoom, and three/four-finger gestures. The L / R clickpad buttons act as the touchpad's physical buttons.
+
+Pointer speed, scroll direction, tap to click and tap dragging in the app's settings are Android's own touchpad settings (Settings → System → Touchpad). On the phone's own screen, or if the virtual touchpad cannot be created, the app falls back to injecting mouse events directly (no system pointer).
+
 ## In-app updates
 
 Release builds check GitHub Releases once a day on launch (and on demand from **Settings → 앱 업데이트**). When a newer version exists, a banner offers to download it; the APK is checked (size, SHA-256 digest, package name, versionCode, signing key) and handed to the Android system installer, where you confirm the update. The first time, Android asks you to allow installs from this app.

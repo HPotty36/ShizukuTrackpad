@@ -34,8 +34,26 @@ data class ShizukuState(
     val isServiceBound: Boolean = false,
     val cursorX: Float = 0f,
     val cursorY: Float = 0f,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    /** True while the virtual uhid touchpad is up; raw touches are forwarded to it. */
+    val isTouchpadActive: Boolean = false
 )
+
+/** One finger in touchpad device units (0..[TOUCHPAD_LOGICAL_MAX] on both axes). */
+data class TouchContact(val id: Int, val x: Int, val y: Int, val tip: Boolean)
+
+/** Android's system-wide touchpad settings (Settings > System > Touchpad). */
+data class TouchpadSystemSettings(
+    val pointerSpeed: Int = 0,
+    val naturalScrolling: Boolean = true,
+    val tapToClick: Boolean = true,
+    val tapDragging: Boolean = true
+)
+
+const val TOUCHPAD_LOGICAL_MAX = 4095
+const val TOUCHPAD_PHYSICAL_SIZE_MM = 160f
+const val TOUCHPAD_BUTTON_LEFT = 0x01
+const val TOUCHPAD_BUTTON_RIGHT = 0x02
 
 class ShizukuServiceManager(context: Context) {
 
@@ -51,6 +69,17 @@ class ShizukuServiceManager(context: Context) {
     private var currentDisplay: DisplayTarget? = null
 
     private var isBindingRequested: Boolean = false
+
+    private val _touchpadSettings = MutableStateFlow<TouchpadSystemSettings?>(null)
+    val touchpadSettings: StateFlow<TouchpadSystemSettings?> = _touchpadSettings.asStateFlow()
+
+    private val prefs = appContext.getSharedPreferences("touchpad", Context.MODE_PRIVATE)
+
+    // Touchpad frame state, only touched on ipcExecutor.
+    private var touchButtons = 0
+    private var activeContacts: List<TouchContact> = emptyList()
+    @Volatile
+    private var touchpadStartRequested = false
 
     // Single-threaded executor guarantees FIFO ordering for pointer/click IPC calls off the main thread
     private val ipcExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
@@ -95,6 +124,7 @@ class ShizukuServiceManager(context: Context) {
                 )
             }
 
+            touchpadStartRequested = false
             currentDisplay?.let { display ->
                 setTargetDisplay(display)
             }
@@ -110,6 +140,8 @@ class ShizukuServiceManager(context: Context) {
         override fun onServiceDisconnected(name: ComponentName?) {
             injectorService = null
             isBindingRequested = false
+            touchpadStartRequested = false
+            _state.update { it.copy(isTouchpadActive = false) }
             refreshStatus(disconnected = true)
         }
     }
@@ -124,8 +156,10 @@ class ShizukuServiceManager(context: Context) {
     private val binderDeadListener = Shizuku.OnBinderDeadListener {
         injectorService = null
         isBindingRequested = false
+        touchpadStartRequested = false
         _state.update {
             it.copy(
+                isTouchpadActive = false,
                 status = ShizukuConnectionStatus.SHIZUKU_NOT_RUNNING,
                 isBinderAlive = false,
                 isServiceBound = false,
@@ -273,7 +307,137 @@ class ShizukuServiceManager(context: Context) {
                 }
             }.onFailure { handleIpcFailure(it) }
         }
+        // The touchpad's pointer only makes sense on another screen: on the phone display it
+        // would share the window with the fingers driving it, and Android lets one device win.
+        if (display.isExternal) startTouchpadIfNeeded(service, display) else stopTouchpad(service)
     }
+
+    private fun stopTouchpad(service: IInputInjectorService) {
+        if (!touchpadStartRequested && !_state.value.isTouchpadActive) return
+        touchpadStartRequested = false
+        ipcExecutor.execute {
+            runCatching { service.stopTouchpad() }.onFailure { handleIpcFailure(it) }
+            activeContacts = emptyList()
+            touchButtons = 0
+            _state.update { it.copy(isTouchpadActive = false) }
+        }
+    }
+
+    /**
+     * Brings up the virtual touchpad once per connection (external displays only). If the device cannot be created
+     * (no uhid access on this ROM), the app keeps using injected mouse events.
+     */
+    private fun startTouchpadIfNeeded(service: IInputInjectorService, display: DisplayTarget) {
+        if (touchpadStartRequested) return
+        touchpadStartRequested = true
+        ipcExecutor.execute {
+            val started = runCatching { service.startTouchpad(display.displayId) }
+                .onFailure { Log.e(TAG, "startTouchpad failed", it) }
+                .getOrDefault(false)
+            if (!started) {
+                val err = runCatching { service.lastError }.getOrNull().orEmpty()
+                Log.w(TAG, "Virtual touchpad unavailable: $err")
+            }
+            _state.update { it.copy(isTouchpadActive = started) }
+            if (started) {
+                applyTouchpadDefaultsOnce(service)
+                loadTouchpadSettingsLocked(service)
+            }
+        }
+    }
+
+    /** Forwards one touch frame (current fingers + just-lifted ones) to the virtual touchpad. */
+    fun sendTouchFrame(contacts: List<TouchContact>) {
+        val service = injectorService ?: return
+        ipcExecutor.execute {
+            activeContacts = contacts.filter { it.tip }
+            sendFrameLocked(service, contacts)
+        }
+    }
+
+    /** Presses or releases a touchpad button (the L / R clickpad floor). */
+    fun setTouchpadButton(mask: Int, pressed: Boolean) {
+        val service = injectorService ?: return
+        ipcExecutor.execute {
+            touchButtons = if (pressed) touchButtons or mask else touchButtons and mask.inv()
+            sendFrameLocked(service, activeContacts)
+        }
+    }
+
+    private fun sendFrameLocked(service: IInputInjectorService, contacts: List<TouchContact>) {
+        runCatching {
+            service.sendTouchpadFrame(
+                IntArray(contacts.size) { contacts[it].id },
+                IntArray(contacts.size) { contacts[it].x },
+                IntArray(contacts.size) { contacts[it].y },
+                BooleanArray(contacts.size) { contacts[it].tip },
+                touchButtons
+            )
+        }.onFailure { handleIpcFailure(it) }
+    }
+
+    fun refreshTouchpadSettings() {
+        val service = injectorService ?: return
+        ipcExecutor.execute { loadTouchpadSettingsLocked(service) }
+    }
+
+    fun updateTouchpadSettings(transform: (TouchpadSystemSettings) -> TouchpadSystemSettings) {
+        val service = injectorService ?: return
+        val current = _touchpadSettings.value ?: TouchpadSystemSettings()
+        val updated = transform(current)
+        _touchpadSettings.value = updated
+        ipcExecutor.execute {
+            runCatching {
+                if (updated.pointerSpeed != current.pointerSpeed) {
+                    service.putTouchpadSetting(KEY_POINTER_SPEED, updated.pointerSpeed.toString())
+                }
+                if (updated.naturalScrolling != current.naturalScrolling) {
+                    service.putTouchpadSetting(KEY_NATURAL_SCROLLING, updated.naturalScrolling.toFlag())
+                }
+                if (updated.tapToClick != current.tapToClick) {
+                    service.putTouchpadSetting(KEY_TAP_TO_CLICK, updated.tapToClick.toFlag())
+                }
+                if (updated.tapDragging != current.tapDragging) {
+                    service.putTouchpadSetting(KEY_TAP_DRAGGING, updated.tapDragging.toFlag())
+                }
+            }.onFailure { handleIpcFailure(it) }
+        }
+    }
+
+    private fun loadTouchpadSettingsLocked(service: IInputInjectorService) {
+        runCatching {
+            val defaults = TouchpadSystemSettings()
+            TouchpadSystemSettings(
+                pointerSpeed = service.getTouchpadSetting(KEY_POINTER_SPEED)?.toIntOrNull()
+                    ?.coerceIn(MIN_POINTER_SPEED, MAX_POINTER_SPEED) ?: defaults.pointerSpeed,
+                naturalScrolling = service.getTouchpadSetting(KEY_NATURAL_SCROLLING)?.let { it == "1" }
+                    ?: defaults.naturalScrolling,
+                tapToClick = service.getTouchpadSetting(KEY_TAP_TO_CLICK)?.let { it == "1" }
+                    ?: defaults.tapToClick,
+                tapDragging = service.getTouchpadSetting(KEY_TAP_DRAGGING)?.let { it == "1" }
+                    ?: defaults.tapDragging
+            )
+        }.onSuccess { _touchpadSettings.value = it }
+            .onFailure { Log.w(TAG, "Could not read touchpad settings", it) }
+    }
+
+    /**
+     * Tap to click and tap dragging were how this app always behaved; turn them on for the
+     * system touchpad once, unless the user has already chosen a value in Android settings.
+     */
+    private fun applyTouchpadDefaultsOnce(service: IInputInjectorService) {
+        if (prefs.getBoolean(PREF_DEFAULTS_APPLIED, false)) return
+        runCatching {
+            for (key in listOf(KEY_TAP_TO_CLICK, KEY_TAP_DRAGGING)) {
+                if (service.getTouchpadSetting(key) == null) {
+                    service.putTouchpadSetting(key, "1")
+                }
+            }
+            prefs.edit().putBoolean(PREF_DEFAULTS_APPLIED, true).apply()
+        }.onFailure { Log.w(TAG, "Could not apply touchpad defaults", it) }
+    }
+
+    private fun Boolean.toFlag(): String = if (this) "1" else "0"
 
     fun moveCursor(dx: Float, dy: Float) {
         val service = injectorService ?: return
@@ -472,5 +636,12 @@ class ShizukuServiceManager(context: Context) {
     companion object {
         private const val TAG = "ShizukuServiceManager"
         private const val SHIZUKU_PERMISSION_REQUEST_CODE = 1001
+        private const val PREF_DEFAULTS_APPLIED = "tap_defaults_applied"
+        private const val KEY_POINTER_SPEED = "touchpad_pointer_speed"
+        private const val KEY_NATURAL_SCROLLING = "touchpad_natural_scrolling"
+        private const val KEY_TAP_TO_CLICK = "touchpad_tap_to_click"
+        private const val KEY_TAP_DRAGGING = "touchpad_tap_dragging"
+        const val MIN_POINTER_SPEED = -7
+        const val MAX_POINTER_SPEED = 7
     }
 }
